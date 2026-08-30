@@ -1,0 +1,38 @@
+# Static configuration — development.
+#
+# Deliberately NO docker provider. The usual Traefik setup mounts
+# /var/run/docker.sock into the edge container, which hands the most
+# internet-exposed process on the box the ability to start a privileged
+# container. Routing is declared in files instead; the cost is that adding a
+# service means editing a file, which for a stack this size is the right trade.
+
+log:
+  level: INFO
+
+accessLog:
+  format: json
+  fields:
+    headers:
+      defaultMode: drop
+      names:
+        # Never log Authorization or Cookie. The access log is shipped off-box
+        # and is not a place for credentials (C-3).
+        User-Agent: keep
+        X-Forwarded-For: keep
+
+entryPoints:
+  web:
+    address: ":80"
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+api:
+  # Dashboard on the internal port only; never routed from the internet.
+  dashboard: true
+  insecure: false
+
+ping:
+  entryPoint: web

@@ -1,0 +1,52 @@
+# Static configuration — production. Same as the dev file plus TLS.
+
+log:
+  level: INFO
+
+accessLog:
+  format: json
+  filePath: /var/log/traefik/access.log
+  fields:
+    headers:
+      defaultMode: drop
+      names:
+        User-Agent: keep
+        X-Forwarded-For: keep
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: letsencrypt
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: "${ACME_EMAIL}"
+      storage: /acme/acme.json
+      # HTTP-01 rather than DNS-01: no DNS provider credential has to live on
+      # the box. The trade is that a certificate cannot be issued before the A
+      # record resolves here — which is the correct order anyway.
+      httpChallenge:
+        entryPoint: web
+
+api:
+  dashboard: true
+  insecure: false
+
+ping:
+  entryPoint: web

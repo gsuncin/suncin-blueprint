@@ -1,0 +1,134 @@
+# Routing — development. Hosts are *.localhost, which every modern browser and
+# curl resolve to 127.0.0.1 with no /etc/hosts entry.
+#
+# Production routing is rendered from acme-tf/templates/routers.yml.tftpl with
+# the real domains. The shape is identical; only the rules and the TLS block
+# differ, so a rule that works here works there.
+#
+# ROUTER PRIORITY MATTERS. Traefik matches the highest priority first, and
+# these overlap deliberately: /api/auth/token must be caught by the strict
+# login limiter before the general /api rule sees it.
+
+http:
+  routers:
+
+    # 1000 — scanners. Highest priority so nothing else can claim these paths.
+    block-scanners:
+      rule: >-
+        PathRegexp(`(?i)(^|/)(\.env|\.git|\.aws|wp-|wordpress|phpmyadmin|pma|
+        adminer|cgi-bin/|vendor/|composer\.(json|lock)|config\.(json|php)|
+        \.well-known/security\.txt$)`)
+      priority: 1000
+      entryPoints: [web]
+      middlewares: [block-all]
+      service: noop
+
+    # 900 — login and refresh. Its own router purely so it can carry the 5/min
+    # limiter; folded into the /api rule it would inherit 120/min.
+    api-auth:
+      rule: "Host(`app.localhost`) && PathPrefix(`/api/auth/token`)"
+      priority: 900
+      entryPoints: [web]
+      middlewares: [auth-chain]
+      service: bff
+
+    # 890 — public, and must stay public: the gateway has to be able to fetch
+    # this before it can authenticate anything.
+    api-jwks:
+      rule: "Host(`app.localhost`) && Path(`/api/.well-known/jwks.json`)"
+      priority: 890
+      entryPoints: [web]
+      middlewares: [security-headers]
+      service: bff
+
+    # 880 — unauthenticated on purpose. A health check behind auth tells you
+    # the auth service is up, which is not what you asked.
+    api-health:
+      rule: "Host(`app.localhost`) && Path(`/api/health`)"
+      priority: 880
+      entryPoints: [web]
+      service: bff
+
+    # 870 — provider webhooks. Unauthenticated (the provider has no token) and
+    # signature-verified by the application over the raw body.
+    #
+    # This is the BFF's route, not the microservice's: the service is stateless
+    # and could not act on the event on its own, so the BFF receives it and
+    # relays inward (C-12).
+    api-webhooks:
+      rule: "Host(`app.localhost`) && PathPrefix(`/api/webhooks/`)"
+      priority: 870
+      entryPoints: [web]
+      middlewares: [security-headers, ratelimit-webhook]
+      service: bff
+
+    # 800 — the third-party API. Separate prefix so its auth, its limits and
+    # its scopes can differ from the application's without either affecting the
+    # other. This prefix is why the gateway exists.
+    public-api:
+      rule: "Host(`app.localhost`) && PathPrefix(`/public-api/`)"
+      priority: 800
+      entryPoints: [web]
+      middlewares: [public-api-chain]
+      service: bff
+
+    # 700 — everything else under /api, authenticated.
+    api:
+      rule: "Host(`app.localhost`) && PathPrefix(`/api/`)"
+      priority: 700
+      entryPoints: [web]
+      middlewares: [api-chain]
+      service: bff
+
+    # 100 — the authenticated SPA.
+    web-app:
+      rule: "Host(`app.localhost`)"
+      priority: 100
+      entryPoints: [web]
+      middlewares: [app-chain]
+      service: web
+
+    # 100 — the public landing page. Same container: it serves whichever entry
+    # matches the Host, so there is one image and one deploy for both.
+    web-landing:
+      rule: "Host(`acme.localhost`) || Host(`www.acme.localhost`)"
+      priority: 100
+      entryPoints: [web]
+      middlewares: [security-headers-apex, compress, ratelimit-app]
+      service: web
+
+  services:
+    # The healthCheck blocks below are NOT decoration. Traefik resolves
+    # `http://bff:8000` to an IP and holds it; when a deploy recreates the
+    # container it gets a new IP, and every request 502s with "no available
+    # server" until something re-resolves. The health check is what does that,
+    # and it is why .github/scripts/deploy-remote.sh waits for containers to be
+    # healthy before it considers a deploy finished.
+    bff:
+      loadBalancer:
+        servers:
+          - url: "http://bff:8000"
+        healthCheck:
+          path: /api/health
+          interval: 10s
+          timeout: 5s
+
+    web:
+      loadBalancer:
+        servers:
+          - url: "http://web:8080"
+        healthCheck:
+          path: /healthz
+          interval: 10s
+          timeout: 5s
+
+    # Never reached: the block-all middleware rejects before the service is
+    # called. Traefik requires every router to name one.
+    noop:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:1"
+
+# NOTE: there is deliberately NO router for svc-example. It is reachable only
+# from the bff container, by name, on the `services` network. Adding one here
+# would put a stateless service that trusts its caller on the public internet.

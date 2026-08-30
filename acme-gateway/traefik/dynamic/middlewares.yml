@@ -1,0 +1,148 @@
+# Shared middlewares. Referenced by name from the routers file.
+
+http:
+  middlewares:
+
+    # --- Authentication ----------------------------------------------------
+    # Traefik calls the auth service before forwarding. A 2xx allows the
+    # request and the headers named below are COPIED onto the upstream request,
+    # replacing anything the client sent under those names. That replacement is
+    # what makes the identity headers trustworthy downstream (C-12).
+    forward-auth:
+      forwardAuth:
+        address: "http://auth:8000/verify"
+        authResponseHeaders:
+          - X-Auth-User-Id
+          - X-Auth-Account-Id
+          - X-Auth-Scopes
+          - X-Gateway-Token
+
+    # The third-party gate. Same check plus an explicit scope grant, so an
+    # integration cannot do everything its owner can.
+    forward-auth-records-read:
+      forwardAuth:
+        address: "http://auth:8000/verify/scoped"
+        authRequestHeaders:
+          - Authorization
+          - X-Required-Scope
+        authResponseHeaders:
+          - X-Auth-User-Id
+          - X-Auth-Account-Id
+          - X-Auth-Scopes
+          - X-Gateway-Token
+
+    require-records-read:
+      headers:
+        customRequestHeaders:
+          X-Required-Scope: "records:read"
+
+    # --- Rate limits -------------------------------------------------------
+    # Per purpose, not one global limit: a login attempt and a page load have
+    # nothing in common, and a single limit is either useless against
+    # credential stuffing or hostile to normal browsing.
+    #
+    # This is the PRIMARY rate control. It keys on the source address, which a
+    # client cannot spoof. The application's own throttle keys on a header and
+    # is defence in depth only.
+    ratelimit-app:
+      rateLimit:
+        average: 30
+        period: 1m
+        burst: 20
+
+    ratelimit-api:
+      rateLimit:
+        average: 120
+        period: 1m
+        burst: 60
+
+    # Five a minute. This is the brute-force guard, and it is the reason the
+    # login route has its own router.
+    ratelimit-auth:
+      rateLimit:
+        average: 5
+        period: 1m
+        burst: 5
+
+    ratelimit-webhook:
+      rateLimit:
+        average: 60
+        period: 1m
+        burst: 20
+
+    # --- Scanner block -----------------------------------------------------
+    # An impossible source range, which makes ipAllowList reject everything
+    # that reaches it with a 403.
+    #
+    # Traefik has no equivalent to nginx's `return 444` (close the connection
+    # with no response), so scanners get a 403 rather than silence. The
+    # practical effect is the same: no application code runs, and the access
+    # log gives fail2ban something to ban on.
+    block-all:
+      ipAllowList:
+        sourceRange:
+          - "255.255.255.255/32"
+
+    # --- Response headers --------------------------------------------------
+    security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        frameDeny: true
+        referrerPolicy: "same-origin"
+        customResponseHeaders:
+          Permissions-Policy: "camera=(), geolocation=(), microphone=()"
+          Content-Security-Policy: >-
+            default-src 'self'; base-uri 'self'; connect-src 'self';
+            font-src 'self' data: https://fonts.gstatic.com; form-action 'self';
+            frame-ancestors 'none'; img-src 'self' data: blob:;
+            script-src 'self'; style-src 'self' 'unsafe-inline'
+          # Traefik echoes its version otherwise.
+          Server: ""
+          X-Powered-By: ""
+
+    # For an APEX domain, HSTS must NOT include subdomains: the apex is the
+    # parent of every future subdomain, and the directive would force HTTPS on
+    # hosts that do not have a certificate yet — making them unreachable rather
+    # than merely insecure.
+    security-headers-apex:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: false
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: "same-origin"
+        customResponseHeaders:
+          Server: ""
+          X-Powered-By: ""
+
+    compress:
+      compress:
+        excludedContentTypes:
+          - image/png
+          - image/jpeg
+          - image/webp
+
+    # --- Chains ------------------------------------------------------------
+    app-chain:
+      chain:
+        middlewares: [security-headers, compress, ratelimit-app]
+
+    api-chain:
+      chain:
+        middlewares: [security-headers, compress, ratelimit-api, forward-auth]
+
+    auth-chain:
+      chain:
+        middlewares: [security-headers, ratelimit-auth]
+
+    public-api-chain:
+      chain:
+        middlewares:
+          - security-headers
+          - compress
+          - ratelimit-api
+          - require-records-read
+          - forward-auth-records-read
