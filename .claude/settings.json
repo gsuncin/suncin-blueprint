@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "permissions": {
+    "allow": [
+      "Bash(./scripts/run-all-tests.sh)",
+      "Bash(./scripts/verify-isolation.sh)",
+      "Bash(DEBUG=True DB_NAME=acme_scratch python acme-bff/manage.py test:*)",
+      "Bash(DEBUG=True DB_NAME=acme_scratch python acme-bff/manage.py migrate:*)",
+      "Bash(DEBUG=True DB_NAME=acme_scratch python acme-bff/manage.py makemigrations:*)",
+      "Bash(DEBUG=True DB_NAME=acme_scratch python acme-bff/manage.py check:*)",
+      "Bash(acme-svc-example/.venv/bin/pytest:*)",
+      "Bash(acme-gateway/auth/.venv/bin/pytest:*)",
+      "Bash(npm --prefix acme-web run lint)",
+      "Bash(npm --prefix acme-web run build)",
+      "Bash(npm --prefix acme-web run test:unit:*)",
+      "Bash(npm --prefix acme-web run test:e2e:*)",
+      "Bash(terraform -chdir=acme-tf/envs/oci validate)",
+      "Bash(terraform -chdir=acme-tf/envs/existing-host validate)",
+      "Bash(terraform fmt -check -recursive acme-tf)",
+      "Bash(docker compose ps:*)",
+      "Bash(docker compose logs:*)",
+      "Bash(docker compose config:*)",
+      "Bash(docker network inspect:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh pr view:*)"
+    ]
+  }
+}
