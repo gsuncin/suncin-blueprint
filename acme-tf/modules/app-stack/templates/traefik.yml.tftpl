@@ -1,0 +1,49 @@
+log:
+  level: INFO
+
+accessLog:
+  format: json
+  filePath: /var/log/traefik/access.log
+  fields:
+    headers:
+      # Drop by default and keep only what is useful. An access log that
+      # records Authorization or Cookie is a credential store nobody meant to
+      # create, and it gets shipped off-box.
+      defaultMode: drop
+      names:
+        User-Agent: keep
+        X-Forwarded-For: keep
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: "${acme_email}"
+      storage: /acme/acme.json
+      # HTTP-01, so no DNS provider credential has to live on the box. The
+      # trade is that a certificate cannot be issued before the A record points
+      # here, which is the correct order anyway.
+      httpChallenge:
+        entryPoint: web
+
+api:
+  dashboard: false
+
+ping:
+  entryPoint: web

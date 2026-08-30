@@ -1,0 +1,111 @@
+# Rendered by Terraform. Mirrors acme-gateway/traefik/dynamic/routers.yml with
+# the real domains and TLS. If you add a router in one, add it in the other.
+
+http:
+  routers:
+
+    block-scanners:
+      rule: >-
+        PathRegexp(`(?i)(^|/)(\.env|\.git|\.aws|wp-|wordpress|phpmyadmin|pma|
+        adminer|cgi-bin/|vendor/|composer\.(json|lock)|config\.(json|php))`)
+      priority: 1000
+      entryPoints: [websecure]
+      middlewares: [block-all]
+      service: noop
+      tls: {certResolver: letsencrypt}
+
+    api-auth:
+      rule: "Host(`${domain_app}`) && PathPrefix(`/api/auth/token`)"
+      priority: 900
+      entryPoints: [websecure]
+      middlewares: [auth-chain]
+      service: bff
+      tls: {certResolver: letsencrypt}
+
+    api-jwks:
+      rule: "Host(`${domain_app}`) && Path(`/api/.well-known/jwks.json`)"
+      priority: 890
+      entryPoints: [websecure]
+      middlewares: [security-headers]
+      service: bff
+      tls: {certResolver: letsencrypt}
+
+    api-health:
+      rule: "Host(`${domain_app}`) && Path(`/api/health`)"
+      priority: 880
+      entryPoints: [websecure]
+      service: bff
+      tls: {certResolver: letsencrypt}
+
+    api-webhooks:
+      rule: "Host(`${domain_app}`) && PathPrefix(`/api/webhooks/`)"
+      priority: 870
+      entryPoints: [websecure]
+      middlewares: [security-headers, ratelimit-webhook]
+      service: bff
+      tls: {certResolver: letsencrypt}
+
+    public-api:
+      rule: "Host(`${domain_app}`) && PathPrefix(`/public-api/`)"
+      priority: 800
+      entryPoints: [websecure]
+      middlewares: [public-api-chain]
+      service: bff
+      tls: {certResolver: letsencrypt}
+
+    api:
+      rule: "Host(`${domain_app}`) && PathPrefix(`/api/`)"
+      priority: 700
+      entryPoints: [websecure]
+      middlewares: [api-chain]
+      service: bff
+      tls: {certResolver: letsencrypt}
+
+    web-app:
+      rule: "Host(`${domain_app}`)"
+      priority: 100
+      entryPoints: [websecure]
+      middlewares: [app-chain]
+      service: web
+      tls: {certResolver: letsencrypt}
+
+    # The apex takes security-headers-apex, whose HSTS deliberately omits
+    # includeSubDomains: this host is the parent of every future subdomain, and
+    # the directive would force HTTPS on names that have no certificate yet,
+    # making them unreachable rather than merely insecure.
+    web-landing:
+      rule: "Host(`${domain_apex}`) || Host(`www.${domain_apex}`)"
+      priority: 100
+      entryPoints: [websecure]
+      middlewares: [security-headers-apex, compress, ratelimit-app]
+      service: web
+      tls: {certResolver: letsencrypt}
+
+  services:
+    bff:
+      loadBalancer:
+        servers:
+          - url: "http://bff:8000"
+        # Load-bearing: Traefik caches the resolved container IP, and a deploy
+        # gives it a new one. Without this every request 502s with "no
+        # available server" until Traefik is restarted.
+        healthCheck:
+          path: /api/health
+          interval: 10s
+          timeout: 5s
+
+    web:
+      loadBalancer:
+        servers:
+          - url: "http://web:8080"
+        healthCheck:
+          path: /healthz
+          interval: 10s
+          timeout: 5s
+
+    noop:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:1"
+
+# No router for svc-example, deliberately. See CONSTITUTION C-12.

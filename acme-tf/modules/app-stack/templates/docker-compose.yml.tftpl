@@ -1,0 +1,139 @@
+# Rendered by Terraform, written to /opt/${project}/docker-compose.yml.
+#
+# Re-rendered on every apply, unlike a file dropped once at provision time —
+# which is what forces the "add a service with an override file" workaround.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+
+  traefik:
+    image: traefik:v3.5
+    container_name: ${project}-traefik
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /opt/${project}/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - /opt/${project}/traefik/dynamic:/etc/traefik/dynamic:ro
+      - /opt/${project}/acme:/acme
+      - /var/log/${project}/traefik:/var/log/traefik
+    networks: [edge]
+
+  auth:
+    image: ${image_gateway_auth}
+    container_name: ${project}-auth
+    restart: unless-stopped
+    logging: *default-logging
+    env_file:
+      - /opt/${project}/secrets/gateway.env
+    environment:
+      AUTH_JWKS_URL: http://bff:8000/api/.well-known/jwks.json
+    expose: ["8000"]
+    networks: [edge]
+
+  web:
+    image: ${image_web}
+    container_name: ${project}-web
+    restart: unless-stopped
+    logging: *default-logging
+    expose: ["8080"]
+    networks: [edge]
+
+  bff:
+    image: ${image_bff}
+    container_name: ${project}-bff
+    restart: unless-stopped
+    logging: *default-logging
+    env_file:
+      - /opt/${project}/secrets/app.env
+    expose: ["8000"]
+    networks: [edge, services, data]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  worker:
+    image: ${image_bff}
+    container_name: ${project}-worker
+    restart: unless-stopped
+    logging: *default-logging
+    command: celery -A core worker -B --pool=solo --loglevel=INFO
+    env_file:
+      - /opt/${project}/secrets/app.env
+    # Reuses the bff image, whose HEALTHCHECK curls port 8000 — but this runs
+    # Celery, not gunicorn, so nothing listens there and it would report
+    # unhealthy forever.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A core inspect ping -d celery@$$$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks: [services, data]
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+
+  # Internal only. No ports, and no router in traefik/dynamic/routers.yml.
+  svc-example:
+    image: ${image_svc_example}
+    container_name: ${project}-svc-example
+    restart: unless-stopped
+    logging: *default-logging
+    env_file:
+      - /opt/${project}/secrets/service.env
+    expose: ["8000"]
+    networks: [services]
+
+  postgres:
+    image: postgres:${postgres_version}
+    container_name: ${project}-postgres
+    restart: unless-stopped
+    logging: *default-logging
+    env_file:
+      - /opt/${project}/secrets/postgres.env
+    volumes:
+      - ${data_root}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [data]
+
+  rabbitmq:
+    image: rabbitmq:4-alpine
+    container_name: ${project}-rabbitmq
+    restart: unless-stopped
+    logging: *default-logging
+    env_file:
+      - /opt/${project}/secrets/rabbitmq.env
+    volumes:
+      - ${data_root}/rabbitmq:/var/lib/rabbitmq
+      - /opt/${project}/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-celery.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks: [data]
+
+networks:
+  edge:
+    driver: bridge
+  # Bridge, not internal: an adapter has to reach its provider. What closes
+  # this off is that nothing here publishes a port, nothing here has a Traefik
+  # router, and ufw allows only 80/443 inbound.
+  services:
+    driver: bridge
+  # internal: true — no route in, no route out. Postgres and RabbitMQ have no
+  # business making outbound connections.
+  data:
+    driver: bridge
+    internal: true

@@ -1,0 +1,321 @@
+#cloud-config
+# Rendered by acme-tf/modules/app-stack. Everything below lands on the box at
+# first boot; there is no configuration management beyond this file and the
+# deploy script.
+#
+# FILE MODES ARE LOAD-BEARING: 0644 for configuration, 0600 for anything
+# containing a secret, 0755 for scripts. The compose file is world-readable, so
+# secrets go in env files beside it and never inline in `environment:`.
+
+ssh_pwauth: false
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - fail2ban
+  - ufw
+  - unattended-upgrades
+  - jq
+
+write_files:
+
+  - path: /opt/${project}/docker-compose.yml
+    permissions: "0644"
+    content: |
+${compose_file}
+
+  - path: /opt/${project}/traefik/traefik.yml
+    permissions: "0644"
+    content: |
+${traefik_static}
+
+  - path: /opt/${project}/traefik/dynamic/middlewares.yml
+    permissions: "0644"
+    content: |
+${middlewares}
+
+  - path: /opt/${project}/traefik/dynamic/routers.yml
+    permissions: "0644"
+    content: |
+${traefik_routers}
+
+  - path: /opt/${project}/rabbitmq/rabbitmq.conf
+    permissions: "0644"
+    content: |
+      # Celery's control protocol declares transient non-exclusive reply
+      # queues, which RabbitMQ 4 disabled by default. Without this the worker
+      # consumes tasks but `celery inspect` fails, and its healthcheck can
+      # never pass. See config/rabbitmq/rabbitmq.conf in the repo.
+      deprecated_features.permit.transient_nonexcl_queues = true
+
+  # --- Secrets. 0600, and never inline in the compose file. -----------------
+
+  - path: /opt/${project}/secrets/postgres.env
+    permissions: "0600"
+    content: |
+      POSTGRES_DB=${postgres_db}
+      POSTGRES_USER=${postgres_user}
+      POSTGRES_PASSWORD=${postgres_password}
+
+  - path: /opt/${project}/secrets/rabbitmq.env
+    permissions: "0600"
+    content: |
+      RABBITMQ_DEFAULT_USER=${rabbitmq_user}
+      RABBITMQ_DEFAULT_PASS=${rabbitmq_password}
+
+  - path: /opt/${project}/secrets/app.env
+    permissions: "0600"
+    content: |
+      DEBUG=False
+      SECRET_KEY=${django_secret_key}
+      ALLOWED_HOSTS=${domain_app},bff,127.0.0.1
+      CSRF_TRUSTED_ORIGINS=https://${domain_app}
+      CORS_ALLOWED_ORIGINS=https://${domain_app}
+      LOG_LEVEL=INFO
+
+      DB_NAME=${postgres_db}
+      DB_USER=${postgres_user}
+      DB_PASSWORD=${postgres_password}
+      DB_HOST=postgres
+      DB_PORT=5432
+
+      JWT_PRIVATE_KEY_B64=${jwt_private_key_b64}
+      JWT_ISSUER=${project}-bff
+      JWT_AUDIENCE=${project}-web
+      AUTH_REFRESH_COOKIE_SECURE=True
+      GATEWAY_TOKEN=${gateway_token}
+
+      CELERY_BROKER_URL=${celery_broker_url}
+
+      EXAMPLE_SERVICE_URL=http://svc-example:8000
+      EXAMPLE_SERVICE_JWT_SECRET=${service_jwt_secret}
+      EXAMPLE_SERVICE_JWT_AUDIENCE=${project}-svc-example
+
+      PROVIDER_CREDENTIAL_ENCRYPTION_KEY=${provider_credential_encryption_key}
+
+      SENTRY_DSN=${sentry_dsn}
+      SENTRY_ENVIRONMENT=${sentry_environment}
+
+  - path: /opt/${project}/secrets/gateway.env
+    permissions: "0600"
+    content: |
+      AUTH_ISSUER=${project}-bff
+      AUTH_AUDIENCE=${project}-web
+      AUTH_GATEWAY_TOKEN=${gateway_token}
+
+  - path: /opt/${project}/secrets/service.env
+    permissions: "0600"
+    content: |
+      SVC_EXAMPLE_PROVIDER_MODE=mock
+      SVC_EXAMPLE_JWT_SECRET=${service_jwt_secret}
+      SVC_EXAMPLE_JWT_ISSUER=${project}-bff
+      SVC_EXAMPLE_JWT_AUDIENCE=${project}-svc-example
+
+  - path: /opt/${project}/secrets/registry.env
+    permissions: "0600"
+    content: |
+      REGISTRY_USERNAME=${registry_username}
+      REGISTRY_TOKEN=${registry_token}
+
+  # --- Backups ---------------------------------------------------------------
+
+  - path: /etc/default/${project}-backup
+    permissions: "0600"
+    content: |
+      BACKUP_DIR=/var/backups/${project}/postgres
+      RETENTION_DAYS=${backup_retention_days}
+      POSTGRES_USER=${postgres_user}
+      POSTGRES_DB=${postgres_db}
+      PROJECT=${project}
+
+  - path: /usr/local/bin/${project}-backup.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # Nightly pg_dump with a checksum, pruned by age.
+      #
+      # $$$${VAR} below is a shell expansion that must survive templatefile:
+      # a single $$ would be consumed by Terraform. Values Terraform injects use
+      # a single $$ and are already substituted by the time this runs.
+      set -Eeuo pipefail
+      source /etc/default/${project}-backup
+
+      mkdir -p "$${BACKUP_DIR}"
+      stamp="$$(date -u +%Y%m%dT%H%M%SZ)"
+      target="$${BACKUP_DIR}/$${POSTGRES_DB}-$${stamp}.dump"
+
+      docker exec "$${PROJECT}-postgres" \
+          pg_dump -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -Fc > "$${target}"
+
+      # A backup nobody verified is a hope. The checksum is the cheapest form
+      # of verification that catches a truncated write.
+      sha256sum "$${target}" > "$${target}.sha256"
+
+      find "$${BACKUP_DIR}" -name '*.dump*' -mtime "+$${RETENTION_DAYS}" -delete
+      echo "backup written: $${target}"
+
+  - path: /etc/systemd/system/${project}-backup.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=${project} postgres backup
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/${project}-backup.sh
+
+  - path: /etc/systemd/system/${project}-backup.timer
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Nightly ${project} postgres backup
+      [Timer]
+      OnCalendar=*-*-* 02:31:00
+      # Every box in a fleet would otherwise dump at the same instant.
+      RandomizedDelaySec=900
+      Persistent=true
+      [Install]
+      WantedBy=timers.target
+
+  # --- The stack as a systemd unit -------------------------------------------
+  # A unit rather than a cron @reboot line: `systemctl status` answers whether
+  # it came up, `journalctl -u` says why it did not, and the ordering against
+  # docker.service is declared instead of hoped for.
+
+  - path: /etc/systemd/system/${project}.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=${project} application stack
+      Requires=docker.service
+      After=docker.service network-online.target
+      [Service]
+      Type=oneshot
+      RemainAfterExit=true
+      WorkingDirectory=/opt/${project}
+      ExecStart=/usr/bin/docker compose up -d --remove-orphans
+      ExecStop=/usr/bin/docker compose down
+      TimeoutStartSec=0
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "3" }
+      }
+
+  # --- fail2ban over the Traefik access log ----------------------------------
+  # Traefik has no equivalent to nginx's `return 444`, so a blocked scanner
+  # gets a 403 and shows up here. This is what turns that 403 into a ban.
+
+  - path: /etc/fail2ban/filter.d/${project}-traefik.conf
+    permissions: "0644"
+    content: |
+      [Definition]
+      failregex = ^.*"ClientHost":"<HOST>".*"DownstreamStatus":(403|429).*$$
+      ignoreregex =
+
+  - path: /etc/fail2ban/jail.d/${project}.local
+    permissions: "0644"
+    content: |
+      [sshd]
+      enabled = true
+      maxretry = 5
+      findtime = 10m
+      bantime = 30m
+
+      [${project}-traefik]
+      enabled  = true
+      filter   = ${project}-traefik
+      logpath  = /var/log/${project}/traefik/access.log
+      maxretry = 8
+      findtime = 5m
+      bantime  = 2h
+
+  - path: /usr/local/bin/${project}-first-boot.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -Eeuo pipefail
+
+      log=/var/log/${project}-first-boot.log
+      # Dual sink: the file survives a reboot, the console shows it in the
+      # provider's serial output when SSH is not up yet.
+      exec > >(tee -a "$$log" | logger -t ${project}-first-boot -s 2>/dev/console) 2>&1
+      trap 'rc=$$?; echo "$$(date -Is) first boot FAILED rc=$$rc line=$$LINENO" \
+            | tee /opt/${project}/deploy-status; exit $$rc' ERR
+
+      cd /opt/${project}
+
+      source /opt/${project}/secrets/registry.env
+      echo "$${REGISTRY_TOKEN}" | docker login -u "$${REGISTRY_USERNAME}" --password-stdin
+
+      docker compose pull
+
+      docker compose up -d postgres rabbitmq
+      for i in $$(seq 1 60); do
+          docker exec ${project}-postgres pg_isready -q && break
+          sleep 2
+      done
+
+      # Migrations run once, here, before any app container is started. Two
+      # containers racing the migration lock is how a deploy half-applies.
+      docker compose run --rm bff python manage.py migrate --noinput < /dev/null
+      docker compose run --rm bff python manage.py createcachetable < /dev/null
+
+      systemctl enable --now ${project}.service
+
+      echo "$$(date -Is) first boot succeeded" | tee /opt/${project}/deploy-status
+
+runcmd:
+  # Docker from the official repository: the distribution package lags, and
+  # `docker compose` v2 as a subcommand is not in Ubuntu's docker.io at all.
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - systemctl enable --now docker
+
+  - mkdir -p /opt/${project}/acme /var/log/${project}/traefik /var/backups/${project}/postgres
+  - chmod 700 /opt/${project}/secrets /var/backups/${project}/postgres
+  # acme.json must be 0600 or Traefik refuses to use it, and the error names
+  # the permission rather than the file, which is a slow ten minutes.
+  - touch /opt/${project}/acme/acme.json
+  - chmod 600 /opt/${project}/acme/acme.json
+  # fail2ban's jail opens this at start and races whatever would create it.
+  - touch /var/log/${project}/traefik/access.log
+
+  %{ if data_device != "" ~}
+  # Format only if there is no filesystem yet, so re-running cloud-init on an
+  # existing volume cannot wipe the database.
+  - blkid ${data_device} || mkfs.ext4 -F ${data_device}
+  - mkdir -p /mnt/data
+  - grep -q "${data_device}" /etc/fstab || echo "${data_device} /mnt/data ext4 defaults,nofail 0 2" >> /etc/fstab
+  - mount -a
+  - mkdir -p /mnt/data/postgres /mnt/data/rabbitmq
+  %{ endif ~}
+
+  %{ if tailscale_authkey != "" ~}
+  - curl -fsSL https://tailscale.com/install.sh | sh
+  - tailscale up --authkey=${tailscale_authkey} --hostname=${project} --accept-dns=false --ssh
+  %{ endif ~}
+
+  # 80 and 443 only. Port 22 is NOT opened to the internet: SSH arrives over
+  # the Tailscale interface, which needs outbound UDP and no inbound rule.
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw allow in on tailscale0 to any port 22 proto tcp
+  - ufw --force enable
+
+  - systemctl enable --now fail2ban
+  - systemctl daemon-reload
+  - systemctl enable --now ${project}-backup.timer
+  - /usr/local/bin/${project}-first-boot.sh

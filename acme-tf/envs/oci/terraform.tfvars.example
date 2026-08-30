@@ -1,0 +1,37 @@
+# Copy to terraform.tfvars and fill in. Gitignored — never commit the copy.
+# Secrets are better passed as TF_VAR_* from a sourced .env, so they stay out
+# of a file that is easy to `cat` into a chat window.
+
+tenancy_ocid     = "ocid1.tenancy.oc1..."
+user_ocid        = "ocid1.user.oc1..."
+fingerprint      = "aa:bb:cc:..."
+private_key_path = "~/.oci/oci_api_key.pem"
+region           = "sa-saopaulo-1"
+compartment_ocid = "ocid1.compartment.oc1..."
+
+project     = "acme"
+domain_app  = "app.example.com"
+domain_apex = "example.com"
+acme_email  = "ops@example.com"
+
+# Immutable tags. Never ":latest" — a box running "latest" cannot tell you what
+# it is running, and rollback becomes guesswork.
+image_gateway_auth = "registry.example.com/acme-auth:sha-abc1234"
+image_bff          = "registry.example.com/acme-bff:sha-abc1234"
+image_web          = "registry.example.com/acme-web:sha-abc1234"
+image_svc_example  = "registry.example.com/acme-svc-example:sha-abc1234"
+
+enable_instance = true
+data_volume_gb  = 50
+
+# Secrets: set these as TF_VAR_registry_token etc. instead of writing them here.
+# registry_username = ...
+# registry_token = ...
+# postgres_password = ...
+# rabbitmq_password = ...
+# django_secret_key = ...
+# jwt_private_key_b64 = ...
+# gateway_token = ...
+# service_jwt_secret = ...
+# provider_credential_encryption_key = ...
+# tailscale_authkey = ...   # REUSABLE, not single-use
