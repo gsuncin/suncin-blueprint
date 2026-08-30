@@ -1,0 +1,183 @@
+# Development stack. Builds locally, serves over plain HTTP on *.localhost.
+# Production overrides live in docker-compose.prod.yml.
+#
+# THE NETWORK TOPOLOGY IS THE POINT. Read `networks:` at the bottom first.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+
+  # The ONLY service with a published port. Adding a second one is a
+  # specification change, not an implementation detail (C-12), and
+  # scripts/verify-isolation.sh will fail if you do it by accident.
+  traefik:
+    image: traefik:v3.5
+    container_name: acme-traefik
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "80:80"
+    volumes:
+      - ./acme-gateway/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./acme-gateway/traefik/dynamic:/etc/traefik/dynamic:ro
+      # Deliberately NOT /var/run/docker.sock. See acme-gateway/README.md.
+    networks: [edge]
+    depends_on:
+      auth: {condition: service_healthy}
+
+  auth:
+    build: ./acme-gateway/auth
+    image: acme/auth:dev
+    container_name: acme-auth
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      AUTH_JWKS_URL: http://bff:8000/api/.well-known/jwks.json
+      AUTH_ISSUER: acme-bff
+      AUTH_AUDIENCE: acme-web
+      AUTH_GATEWAY_TOKEN: ${GATEWAY_TOKEN:-dev-gateway-token}
+    expose: ["8000"]
+    networks: [edge]
+
+  web:
+    build:
+      context: ./acme-web
+      args:
+        VITE_API_URL: /api
+    image: acme/web:dev
+    container_name: acme-web
+    restart: unless-stopped
+    logging: *default-logging
+    expose: ["8080"]
+    networks: [edge]
+
+  bff:
+    build: ./acme-bff
+    image: acme/bff:dev
+    container_name: acme-bff
+    restart: unless-stopped
+    logging: *default-logging
+    env_file: [./.env]
+    environment:
+      DB_HOST: postgres
+      EXAMPLE_SERVICE_URL: http://svc-example:8000
+      CELERY_BROKER_URL: amqp://acme:${RABBITMQ_PASSWORD:-acme-dev}@rabbitmq:5672//
+    expose: ["8000"]
+    # On all three: reachable from the gateway, reaches the microservice,
+    # reaches the datastores. It is the only service that spans them.
+    networks: [edge, services, data]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  worker:
+    # No `build:` — it reuses the bff image. Two services declaring the same
+    # build context and image name race each other on export, and buildx fails
+    # with "image already exists". Same code, same image, different command.
+    image: acme/bff:dev
+    pull_policy: never
+    container_name: acme-worker
+    restart: unless-stopped
+    logging: *default-logging
+    command: celery -A core worker -B --pool=solo --loglevel=INFO
+    env_file: [./.env]
+    environment:
+      DB_HOST: postgres
+      EXAMPLE_SERVICE_URL: http://svc-example:8000
+      CELERY_BROKER_URL: amqp://acme:${RABBITMQ_PASSWORD:-acme-dev}@rabbitmq:5672//
+    # The worker reuses the bff image, whose HEALTHCHECK curls port 8000 — but
+    # this container runs Celery, not gunicorn, so nothing listens there and it
+    # would sit "unhealthy" forever. That is not cosmetic: `up --wait` and the
+    # deploy's readiness loop both key on health.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A core inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    # Worker and beat in one process. Correct for one box; the first thing to
+    # split when there are two, because two beats mean every task fires twice.
+    networks: [services, data]
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      bff: {condition: service_started}
+
+  # No `ports:`, and no router in acme-gateway/traefik/dynamic/routers.yml.
+  # Those two absences are the whole of its isolation.
+  svc-example:
+    build: ./acme-svc-example
+    image: acme/svc-example:dev
+    container_name: acme-svc-example
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      SVC_EXAMPLE_PROVIDER_MODE: ${SVC_EXAMPLE_PROVIDER_MODE:-mock}
+      SVC_EXAMPLE_JWT_SECRET: ${EXAMPLE_SERVICE_JWT_SECRET:-}
+    expose: ["8000"]
+    networks: [services]
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: acme-postgres
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: ${DB_NAME:-acme}
+      POSTGRES_USER: ${DB_USER:-acme}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-acme-dev}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-acme} -d ${DB_NAME:-acme}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [data]
+
+  rabbitmq:
+    image: rabbitmq:4-alpine
+    container_name: acme-rabbitmq
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      RABBITMQ_DEFAULT_USER: acme
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-acme-dev}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      # Permits the deprecated feature Celery's control protocol needs. See the
+      # file for why, and for when it can go.
+      - ./config/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-celery.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks: [data]
+
+volumes:
+  pgdata:
+  rabbitmq-data:
+
+networks:
+  # Anything the gateway must reach. Only traefik publishes a port here.
+  edge:
+    driver: bridge
+
+  # Internal services. A plain bridge, NOT `internal: true`, because a provider
+  # adapter has to reach the internet to call its provider. What closes this
+  # network off is that nothing here publishes a port and nothing here has a
+  # router in Traefik — plus the host firewall, which opens 80/443 only.
+  services:
+    driver: bridge
+
+  # Datastores. `internal: true` removes the gateway entirely: no route in from
+  # anywhere, and no route out to the internet. Postgres and RabbitMQ have no
+  # business making outbound connections, and this makes that structural rather
+  # than a matter of trust.
+  data:
+    driver: bridge
+    internal: true

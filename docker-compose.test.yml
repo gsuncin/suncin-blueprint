@@ -1,0 +1,34 @@
+# A scratch Postgres for running the suites from your host.
+#
+# SEPARATE FILE, and started explicitly — never merged into docker-compose.yml.
+# The application's Postgres lives on the `data` network with internal: true
+# and publishes nothing, which is the point (C-12). Adding a published port
+# there to make testing convenient would quietly undo that.
+#
+# This one is disposable: it holds no application data, it is not part of the
+# running stack, and `make test-db-down` deletes it volume and all.
+#
+#   docker compose -f docker-compose.test.yml up -d
+#
+# Port 5433, not 5432, so it cannot collide with a Postgres you already run.
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: acme-postgres-test
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: acme_scratch
+      POSTGRES_USER: acme
+      POSTGRES_PASSWORD: acme
+    ports:
+      - "127.0.0.1:5433:5432"
+    tmpfs:
+      # In memory: the suite recreates everything it needs, nothing here is
+      # worth persisting, and it makes the tests noticeably faster.
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U acme -d acme_scratch"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
