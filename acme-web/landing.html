@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Acme — ship the boring parts once</title>
+    <meta name="description" content="A monorepo template with a gateway, a BFF, a stateless service, and the deployment that carries them." />
+    <link rel="canonical" href="https://acme.example.com/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Acme — ship the boring parts once" />
+    <meta property="og:description" content="A monorepo template with a gateway, a BFF, a stateless service, and the deployment that carries them." />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Inline, so it applies from the first paint. A reduced-motion rule that
+         arrives with the JS bundle has already let one animation run. -->
+    <style>
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/landing/main.tsx"></script>
+  </body>
+</html>
