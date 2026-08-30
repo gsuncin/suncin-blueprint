@@ -1,0 +1,43 @@
+name: isolation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: isolation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # C-12 is the rule most likely to be broken by accident — someone publishes a
+  # port to debug something and does not take it out again. This runs on every
+  # change, not on a path filter, because the compose file is not the only way
+  # to break it.
+  gateway-is-the-only-ingress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: generate local secrets
+        run: ./scripts/gen-keys.sh
+
+      - name: build and start the stack
+        run: docker compose up -d --build --wait
+
+      - name: verify isolation
+        run: ./scripts/verify-isolation.sh
+
+      - name: stack logs
+        if: failure()
+        run: docker compose logs --tail 100
+
+      - name: tear down
+        if: always()
+        run: docker compose down -v

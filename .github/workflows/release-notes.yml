@@ -1,0 +1,60 @@
+name: release notes
+
+# The release note is written in the repo and lives there. Pushing the tag
+# publishes it. An agent starting cold in a fresh worktree reads releases/ from
+# disk — no API call, no token, no network.
+on:
+  push:
+    tags: ["R-[0-9][0-9][0-9]"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: find the note
+        id: note
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          matches=(releases/${tag}-*.md)
+
+          # Numbers are never reused, so exactly one file must match. Zero
+          # means the tag was pushed before the note; two means a number was
+          # reused, and publishing either one would be wrong.
+          if [ ! -e "${matches[0]}" ]; then
+            echo "No releases/${tag}-*.md — write the note before tagging." >&2
+            exit 1
+          fi
+          if [ "${#matches[@]}" -ne 1 ]; then
+            echo "Expected exactly one note for ${tag}, found ${#matches[@]}." >&2
+            printf '%s\n' "${matches[@]}" >&2
+            exit 1
+          fi
+
+          echo "path=${matches[0]}" >> "$GITHUB_OUTPUT"
+          echo "title=$(head -1 "${matches[0]}" | sed 's/^#\+ *//')" >> "$GITHUB_OUTPUT"
+
+      - name: create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          # Create-or-update, so re-running cannot produce two releases for one
+          # number.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+              --title "${{ steps.note.outputs.title }}" \
+              --notes-file "${{ steps.note.outputs.path }}"
+          else
+            gh release create "$tag" \
+              --title "${{ steps.note.outputs.title }}" \
+              --notes-file "${{ steps.note.outputs.path }}"
+          fi

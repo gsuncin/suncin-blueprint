@@ -1,0 +1,33 @@
+# workflow_call ONLY. See bff-tests.yml for why a second trigger breaks this.
+name: svc-example tests
+
+on:
+  workflow_dispatch: {}
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: svc-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: acme-svc-example/requirements-dev.txt
+
+      - run: pip install -r requirements-dev.txt
+        working-directory: acme-svc-example
+
+      - run: pytest -q
+        working-directory: acme-svc-example

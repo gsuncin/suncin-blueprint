@@ -1,0 +1,84 @@
+# workflow_call ONLY — no push, no pull_request.
+#
+# A direct trigger alongside the reusable call means two runs share the
+# concurrency group below, and cancel-in-progress kills one of them. The
+# symptom is a red check that was cancelled after two seconds sitting next to
+# the green one that actually ran, which is how a team learns to ignore a red
+# check.
+name: bff tests
+
+on:
+  workflow_dispatch: {}
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bff-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  django:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: acme_test
+          POSTGRES_USER: acme
+          POSTGRES_PASSWORD: acme
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+        ports: ["5432:5432"]
+
+    env:
+      DEBUG: "True"
+      SECRET_KEY: ci-only-not-a-real-key
+      DB_NAME: acme_test
+      DB_USER: acme
+      DB_PASSWORD: acme
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      CELERY_TASK_ALWAYS_EAGER: "True"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: acme-bff/requirements-dev.txt
+
+      - run: pip install -r requirements-dev.txt
+        working-directory: acme-bff
+
+      # DATABASES["default"]["TEST"] is a MIRROR, so the runner uses DB_NAME
+      # directly instead of creating a throwaway database. Migrating first is
+      # not optional: without it every test errors with "relation ... does not
+      # exist".
+      - run: python manage.py migrate --noinput
+        working-directory: acme-bff
+
+      - run: python manage.py createcachetable
+        working-directory: acme-bff
+
+      # Catches a model change that was never turned into a migration — which
+      # passes locally against an already-migrated database and fails on the
+      # next fresh deploy.
+      - run: python manage.py makemigrations --check --dry-run
+        working-directory: acme-bff
+
+      - run: python manage.py check --deploy --fail-level ERROR
+        working-directory: acme-bff
+        env:
+          DEBUG: "False"
+          ALLOWED_HOSTS: app.example.com
+          JWT_PRIVATE_KEY_B64: ${{ secrets.CI_JWT_PRIVATE_KEY_B64 }}
+
+      - run: python manage.py test --verbosity 2
+        working-directory: acme-bff

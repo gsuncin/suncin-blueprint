@@ -1,0 +1,36 @@
+name: review gate
+
+# Review comments are a merge gate (specs/RELEASES.md).
+#
+# HONEST LIMITATION: this is a signal, not an enforced block. "Require
+# conversation resolution before merging" is a branch-protection setting, and
+# branch protection needs a paid plan on a private repo. Also, resolving a
+# thread fires no webhook, so this does not re-run by itself — push a commit or
+# re-run it by hand after clearing threads.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+  pull_request_review_comment:
+    types: [created, deleted]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  unresolved-threads:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/pr-review-gate.sh "${{ github.event.pull_request.number }}"

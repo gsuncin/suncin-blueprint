@@ -1,0 +1,82 @@
+name: deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Immutable tag to deploy, e.g. sha-abc1234. Never 'latest'."
+        required: true
+        type: string
+  workflow_run:
+    workflows: ["build acme-bff", "build acme-web"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Never cancel a deploy mid-flight. Two builds finishing close together should
+# queue, not race — a cancelled deploy leaves the box half-updated.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # The runner joins the tailnet, then SSHes to a 100.x address. That is
+      # what lets the security group open 80/443 and nothing else — no bastion,
+      # no IP allowlist, no port 22 exposed to the internet.
+      - uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: configure ssh
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.PROD_SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      # The deploy script lives in the repo, is reviewed like any other code,
+      # and is streamed to the box at run time. Nothing deploy-related is
+      # pre-installed on the server, so the box cannot drift from the repo.
+      - name: deploy
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag || format('sha-{0}', github.sha) }}
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROJECT: acme
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" \
+            env IMAGE_TAG="$IMAGE_TAG" \
+                REGISTRY_USERNAME="$REGISTRY_USERNAME" \
+                REGISTRY_TOKEN="$REGISTRY_TOKEN" \
+                PROJECT="$PROJECT" \
+                bash -s < .github/scripts/deploy-remote.sh
+
+      # The deploy script checks health from inside the box. This checks it
+      # from outside, through DNS, TLS and the gateway — the path a user takes.
+      - name: smoke test the public URL
+        run: |
+          for attempt in $(seq 1 10); do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' \
+                    "https://${{ secrets.PROD_DOMAIN_APP }}/api/health" || echo 000)"
+            echo "attempt $attempt: $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 6
+          done
+          echo "public health check never returned 200"
+          exit 1
