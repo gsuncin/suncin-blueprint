@@ -1,0 +1,50 @@
+# --- Secrets. Nothing here is ever committed. -------------------------------
+# A file that was ever committed must be ROTATED, not just removed: everyone
+# who cloned the repo still has it in their history.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!**/testdata/*.key
+secrets/
+
+# Terraform. A .tfplan embeds the whole state, including user_data in
+# plaintext — it is as sensitive as the state itself.
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfplan
+.terraform/
+.terraform.lock.hcl
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# --- Node -------------------------------------------------------------------
+node_modules/
+dist/
+.vite/
+coverage/
+playwright-report/
+test-results/
+.lighthouseci/
+*.tsbuildinfo
+
+# --- Agent scratch ----------------------------------------------------------
+# Worktrees from `isolation: "worktree"` runs. ORCHESTRATION.md says to remove
+# them after each wave; this makes a forgotten one harmless.
+.claude/worktrees/
+.claude/settings.local.json
+
+# --- OS ---------------------------------------------------------------------
+.DS_Store
+*.log
