@@ -30,6 +30,45 @@ produced a duplicate, and one of them landed *behind* what `main` already had.
 3. **[specs/ORCHESTRATION.md](specs/ORCHESTRATION.md)** — if you are launching
    or sequencing agents.
 
+## Which agent does the work
+
+**The directory decides, not the subject.** "It's about billing" tells you
+nothing; "it edits `acme-bff/`" tells you everything.
+
+| The work edits | Agent |
+|---|---|
+| `acme-bff/` | `bff-agent` |
+| `acme-web/` | `frontend-agent` |
+| `acme-svc-*/`, `acme-gateway/auth/` | `service-agent` |
+| `acme-tf/`, `.github/`, `acme-gateway/traefik/` | `infra-agent` |
+| tests, anywhere | `qa-agent` |
+| nothing — it reviews | `security-agent`, `design-agent` (both read-only) |
+| `specs/research/` only, and needs the live web | `research-agent` (no Bash, by design) |
+
+Tools and constraints per agent are in
+[ORCHESTRATION → Agent roster](specs/ORCHESTRATION.md#agent-roster).
+
+**A task that crosses projects belongs to no agent.** Either the orchestrator
+does it directly, or it becomes two tasks with the contract between them fixed
+*before* either starts — in identical words, with instructions to report a
+mismatch rather than renegotiate it.
+
+### Which review runs, and when
+
+So nobody has to judge it:
+
+| The diff touches | Run |
+|---|---|
+| a credential, tenancy, the gateway, a public endpoint, a webhook, PII, or a migration | `security-agent` |
+| `acme-web/src/**` | `design-agent` |
+| a contract between two projects — an env var name, a header, an image name, a service list | a **derived** check, plus reading both ends against each other |
+| documentation only | nothing — and say that in the note, rather than leaving it ambiguous |
+
+**The third row is the one that costs the most.** Each end agrees with itself,
+the two disagree with each other, and no suite can see it — because each mocks
+the other. A suite cannot be the thing that catches that; a check that derives
+the same fact from both ends is.
+
 ## Layout
 
 | Path | What | Stack |

@@ -3,11 +3,12 @@ name: bff-agent
 description: Use for acme-bff (Django/DRF) work — models, migrations, service functions, viewsets, serializers, permissions, entitlements, Celery tasks, management commands, and their tests. This is the agent for the BFF layer that fronts the microservices and issues the identity tokens the gateway validates.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: opus
+isolation: worktree
 ---
 
 # BFF agent
 
-You own `acme-bff`. You do not edit `acme-web`, `acme-svc-example`,
+You own `acme-bff`. You do not edit `acme-web`, `acme-svc-*`,
 `acme-gateway`, or `acme-tf`.
 
 ## Before you touch anything

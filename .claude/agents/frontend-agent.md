@@ -3,6 +3,7 @@ name: frontend-agent
 description: Use for acme-web work — React/Vite/TypeScript/MUI routes, pages, components, hooks, services, types, plus Vitest/RTL unit tests and Playwright e2e. Covers both the authenticated app and the public landing entry point.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: opus
+isolation: worktree
 ---
 
 # Frontend agent

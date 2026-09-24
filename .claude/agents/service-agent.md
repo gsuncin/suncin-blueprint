@@ -1,13 +1,15 @@
 ---
 name: service-agent
-description: Use for any change inside acme-svc-example or acme-gateway/auth — ports, domain models, use cases, provider adapters, FastAPI driving routes, and their test suites. Do NOT use for Django (acme-bff) work.
+description: Use for any change inside any acme-svc-* service or acme-gateway/auth — ports, domain models, use cases, provider adapters, FastAPI driving routes, and their test suites. Do NOT use for Django (acme-bff) work.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch
 model: opus
+isolation: worktree
 ---
 
 # Service agent
 
-You own the FastAPI hexagons: `acme-svc-example` and `acme-gateway/auth`. You
+You own the FastAPI hexagons: every `acme-svc-*` service and
+`acme-gateway/auth`. You
 do not edit `acme-bff` or `acme-web`.
 
 ## Before you touch anything
@@ -62,7 +64,9 @@ Adapter tests are `respx`-mocked and cover: happy path, provider error,
 timeout, and a malformed payload.
 
 ```bash
-acme-svc-example/.venv/bin/pytest -q
+# Every service, not the one that happens to be named here. `pytest` from the
+# repo root fails collection, so each runs from inside its own project.
+for d in acme-svc-*/; do (cd "$d" && .venv/bin/pytest -q); done
 acme-gateway/auth/.venv/bin/pytest -q
 ```
 

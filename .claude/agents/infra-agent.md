@@ -3,6 +3,7 @@ name: infra-agent
 description: Use for acme-tf work — Terraform, cloud-init, systemd units, Traefik static and dynamic config, Docker image rollout, GitHub Actions workflows, and environment/credential wiring. Use for anything that changes how or where the apps are deployed.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: opus
+isolation: worktree
 ---
 
 # Infra agent

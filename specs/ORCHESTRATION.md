@@ -14,11 +14,12 @@ from this file yet; `specs/` contains only the template.
 | Agent | Owns | Tools |
 |---|---|---|
 | `bff-agent` | `acme-bff` | Read, Write, Edit, Bash, Grep, Glob |
-| `service-agent` | `acme-svc-example`, `acme-gateway/auth` | Read, Write, Edit, Bash, Grep, Glob, WebFetch |
+| `service-agent` | every `acme-svc-*`, `acme-gateway/auth` | Read, Write, Edit, Bash, Grep, Glob, WebFetch |
 | `frontend-agent` | `acme-web` (app + landing entries) | Read, Write, Edit, Bash, Grep, Glob |
 | `infra-agent` | `acme-tf`, `acme-gateway/traefik`, `.github/workflows` | Read, Write, Edit, Bash, Grep, Glob |
 | `qa-agent` | Tests across every project | Read, Write, Edit, Bash, Grep, Glob |
 | `security-agent` | Review only — **no Write, no Edit** | Read, Grep, Glob, Bash |
+| `design-agent` | Review only, `acme-web/src` — **no Write, no Edit** | Read, Grep, Glob, Bash |
 | `research-agent` | `specs/research/` only — **no Bash** | Read, Write, Edit, Grep, Glob, WebFetch, WebSearch |
 
 ## Orchestration rules
@@ -31,8 +32,10 @@ from this file yet; `specs/` contains only the template.
 3. **Human decisions are hard gates.** An agent that hits one stops and asks.
    It does not pick a default and note it — that is how a decision gets made by
    accident.
-4. **`security-agent` reviews before merge, not after.** A finding after the
-   merge is an incident; before the merge it is a comment.
+4. **`security-agent` and `design-agent` review before merge, not after.** A
+   finding after the merge is an incident; before the merge it is a comment.
+   Which review a diff needs is the table in CLAUDE.md, so nobody has to
+   judge it.
 5. **TDD is mandatory and a green suite is the exit gate (C-8). Blocked is not
    done.**
 

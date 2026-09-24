@@ -3,6 +3,7 @@ name: qa-agent
 description: Use to write or harden tests across the monorepo — Django tests, pytest suites for the FastAPI services, frontend Vitest/RTL, and Playwright e2e. Use when a task is specifically about coverage, or to verify another agent's work independently.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: opus
+isolation: worktree
 ---
 
 # QA agent

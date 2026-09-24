@@ -4,10 +4,10 @@
     "allow": [
       "Bash(./scripts/run-all-tests.sh)",
       "Bash(./scripts/verify-isolation.sh)",
-      "Bash(DEBUG=True DB_NAME=acme_scratch python acme-bff/manage.py test:*)",
-      "Bash(DEBUG=True DB_NAME=acme_scratch python acme-bff/manage.py migrate:*)",
-      "Bash(DEBUG=True DB_NAME=acme_scratch python acme-bff/manage.py makemigrations:*)",
-      "Bash(DEBUG=True DB_NAME=acme_scratch python acme-bff/manage.py check:*)",
+      "Bash(cd acme-bff && DEBUG=True DB_NAME=acme_scratch python manage.py test:*)",
+      "Bash(cd acme-bff && DEBUG=True DB_NAME=acme_scratch python manage.py migrate:*)",
+      "Bash(cd acme-bff && DEBUG=True DB_NAME=acme_scratch python manage.py makemigrations:*)",
+      "Bash(cd acme-bff && DEBUG=True DB_NAME=acme_scratch python manage.py check:*)",
       "Bash(acme-svc-example/.venv/bin/pytest:*)",
       "Bash(acme-gateway/auth/.venv/bin/pytest:*)",
       "Bash(npm --prefix acme-web run lint)",
@@ -23,7 +23,59 @@
       "Bash(docker network inspect:*)",
       "Bash(gh run list:*)",
       "Bash(gh run view:*)",
-      "Bash(gh pr view:*)"
+      "Bash(gh pr view:*)",
+      "Bash(./scripts/check-doc-links.sh:*)",
+      "Bash(./scripts/verify-like-ci.sh:*)",
+      "Bash(.github/scripts/check-deploy-contract.sh:*)",
+      "Bash(make test-db:*)",
+      "Bash(make test-db-reset:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "checking the suite's working directory",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/hooks/guard-bff-test-cwd.sh"
+          },
+          {
+            "type": "command",
+            "statusMessage": "checking the commit message",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/hooks/guard-commit-attribution.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "checking relative links",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/hooks/warn-broken-md-links.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "checking for uncommitted work",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/hooks/warn-uncommitted-on-stop.sh"
+          },
+          {
+            "type": "command",
+            "statusMessage": "checking the work has a PR",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/hooks/require-pr-on-stop.sh"
+          }
+        ]
+      }
     ]
   }
 }
