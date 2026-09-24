@@ -53,14 +53,14 @@ blocks on a dirty tree rather than trusting anyone to remember.
 `wip(scope):` is an honest subject line. An imperfect commit is recoverable;
 a deleted worktree is not.
 
-## Keeping `staging` current across machines and agents
+## Keeping `develop` current across machines and agents
 
-A worktree-isolated agent branches from `staging` (RELEASES.md, the two-branch
-flow). If `staging` is stale, every agent launched from it is working against a
+A worktree-isolated agent branches from `develop` (RELEASES.md, the two-branch
+flow). If `develop` is stale, every agent launched from it is working against a
 tree that is missing the last release — and a prompt written against your
 branch describes a repository the agent is not looking at.
 
-So: fetch and fast-forward `staging` before launching a wave, not after
+So: fetch and fast-forward `develop` before launching a wave, not after
 something looks wrong.
 
 ## Branching: how a wave is actually run

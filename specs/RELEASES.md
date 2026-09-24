@@ -114,7 +114,7 @@ not an agent's to edit.
 
 ## The two-branch flow
 
-**Branch from `staging`. One workstream per PR. `staging` merges to `main` a
+**Branch from `develop`. One workstream per PR. `develop` merges to `main` a
 release at a time.**
 
 ### Why
@@ -132,21 +132,21 @@ and a `main` that is always exactly what is deployed.
 
 | Merge | Carries |
 |---|---|
-| feature → `staging` | the reviews, a release note in `releases/`, the spec moved to `history/` — all in the same PR |
-| `staging` → `main` | the tag and the GitHub release, because **this** is the merge that ships |
+| feature → `develop` | the reviews, a release note in `releases/`, the spec moved to `history/` — all in the same PR |
+| `develop` → `main` | the tag and the GitHub release, because **this** is the merge that ships |
 
 A feature PR still carries everything it always did. What changed is where it
 lands.
 
 **Long-lived personal accumulation branches are still wrong**, for the reason
-they always were: they strand later work on a stale base. `staging` is not one
+they always were: they strand later work on a stale base. `develop` is not one
 of those — it is short-lived by construction, because a release empties it.
 
-### A worktree-isolated agent branches from `staging`
+### A worktree-isolated agent branches from `develop`
 
 Not from `main`, which now trails by a release, and not from your branch. An
 agent branching from `main` would be working against a tree that is
-deliberately old. Keep `staging` current rather than working around this.
+deliberately old. Keep `develop` current rather than working around this.
 
 ## What a merge requires
 

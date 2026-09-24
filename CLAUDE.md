@@ -145,7 +145,7 @@ removed. Everyone who cloned the repo still has it.
   code, or resolve it with a reply saying why no change is needed. An open
   thread you have not answered blocks the merge; see
   [specs/RELEASES.md](specs/RELEASES.md#before-you-merge-review-comments-are-a-gate).
-- **Branch from `staging`, one workstream per PR; `staging` merges to `main`
+- **Branch from `develop`, one workstream per PR; `develop` merges to `main`
   a release at a time.** See
   [RELEASES → the two-branch flow](specs/RELEASES.md#the-two-branch-flow) for
   why, and for what each merge costs. A feature PR still carries everything it
@@ -161,8 +161,8 @@ removed. Everyone who cloned the repo still has it.
   is wrong, and say which.
 - **One agent per project at a time.** Parallelism comes from agents working in
   *different* projects. Two agents in `acme-bff` will conflict.
-- **A worktree-isolated agent branches from `staging`, not from your branch.**
-  If `staging` is behind, the agent cannot see your unmerged work, and a prompt
+- **A worktree-isolated agent branches from `develop`, not from your branch.**
+  If `develop` is behind, the agent cannot see your unmerged work, and a prompt
   written against your branch describes a repository it is not looking at. Keep
   `main` current instead of working around this.
 - **Do not fabricate provider behaviour** (C-10). A field name, limit, or

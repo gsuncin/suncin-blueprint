@@ -91,15 +91,15 @@ table and the matrix of which review runs when.
 - `RELEASES.md` — the identifier, the two-branch flow, what a merge requires.
 - `specs/README.md` — `specs/` vs `history/`, the three rungs before filing
   a `Q-n`, and that a `Q-n` id is not a question.
-- `ORCHESTRATION.md` — the worktree rule, keeping `staging` current,
+- `ORCHESTRATION.md` — the worktree rule, keeping `develop` current,
   `design-agent` in the roster.
 - `history/` created, with its README.
 
 ## Migration notes
 
-**Adopters must create a `staging` branch** for the two-branch flow.
+**Adopters must create a `develop` branch** for the two-branch flow.
 `require-pr-on-stop.sh` detects its base rather than assuming one, so a
-repository without `staging` is not blocked — it falls back to the remote's
+repository without `develop` is not blocked — it falls back to the remote's
 default branch.
 
 `make keys` now generates `STORAGE_ACCESS_KEY` and `STORAGE_SECRET_KEY`. An

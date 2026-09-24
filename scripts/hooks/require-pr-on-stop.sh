@@ -2,7 +2,7 @@
 # Stop. Blocks ONCE when committed work has no pull request into the
 # integration branch.
 #
-# Work lands on `staging` and `staging` merges to `main` a release at a time
+# Work lands on `develop` and `develop` merges to `main` a release at a time
 # (RELEASES.md, the two-branch flow). Both halves are easy to get right when
 # someone remembers and easy to get wrong when nobody does, so this checks
 # instead of trusting: a branch with commits on it and no PR is work that has
@@ -10,8 +10,8 @@
 # gate.
 #
 # THE BASE IS DETECTED, NOT ASSUMED. A repository that has not adopted the
-# two-branch flow has no `origin/staging`, and a hook that demanded one would
-# block every stop in it forever. So: `staging` if it exists, otherwise the
+# two-branch flow has no `origin/develop`, and a hook that demanded one would
+# block every stop in it forever. So: `develop` if it exists, otherwise the
 # remote's own default branch.
 #
 # Fires only when there is something to propose -- commits ahead of the base --
@@ -41,8 +41,8 @@ cd "$(printf '%s' "$input" | jq -r '.cwd // empty')" 2>/dev/null ||
 branch=$(git branch --show-current 2>/dev/null) || exit 0
 [ -n "$branch" ] || exit 0
 
-if git rev-parse --verify --quiet origin/staging >/dev/null 2>&1; then
-  base_branch=staging
+if git rev-parse --verify --quiet origin/develop >/dev/null 2>&1; then
+  base_branch=develop
 else
   base_branch=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
   base_branch=${base_branch#origin/}
@@ -51,7 +51,7 @@ else
 fi
 
 # The integration branches themselves are never the subject of a feature PR.
-case "$branch" in staging | main | "$base_branch") exit 0 ;; esac
+case "$branch" in develop | main | "$base_branch") exit 0 ;; esac
 
 ahead=$(git rev-list --count "origin/$base_branch..$branch" 2>/dev/null || echo 0)
 [ "${ahead:-0}" -gt 0 ] || exit 0
