@@ -88,4 +88,14 @@ run "terraform fmt"           . terraform fmt -check -recursive acme-tf
 run "terraform init"          . terraform -chdir=acme-tf/tests/render init -backend=false -input=false
 run "terraform render tests"  . terraform -chdir=acme-tf/tests/render test
 
+# Both release-identifier formats, R-NNN and R-YYYY-MM-DD-xxxxxx, must trigger
+# release-notes.yml AND resolve to their note. Reads the trigger out of the
+# workflow and the notes out of releases/, so a wrong pattern or a misnamed note
+# is red here rather than a release that silently never publishes.
+run "release note lookup (shell)" . ./scripts/tests/find-release-note.test.sh
+
+# Every relative link in the docs resolves. The PostToolUse hook runs this on
+# one file at edit time; this is the sweep.
+run "doc links (shell)" . ./scripts/check-doc-links.sh
+
 printf '\n\033[32mAll suites green.\033[0m\n'

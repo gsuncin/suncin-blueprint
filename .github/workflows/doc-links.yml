@@ -1,0 +1,32 @@
+name: doc links
+
+# The gate for scripts/check-doc-links.sh.
+#
+# A check that exists and nothing calls guards nothing — which is how a
+# documentation restructuring pushes a handful of broken links to main in one
+# commit while every suite stays green. The PostToolUse hook in
+# .claude/settings.json runs the same script on one file at edit time; this runs
+# it over the tree, and this is what blocks the merge.
+#
+# No path filter. The links point ACROSS directories, so a file moved anywhere
+# can break a link in specs/ — filtering on the docs would miss exactly the
+# change that breaks them.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: doc-links-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  links:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - run: ./scripts/check-doc-links.sh

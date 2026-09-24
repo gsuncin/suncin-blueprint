@@ -34,6 +34,25 @@ jobs:
       - name: verify isolation
         run: ./scripts/verify-isolation.sh
 
+      # TD-1. The BFF's suite mocks each service and each service's suite mocks
+      # the BFF, so a wire contract between them is asserted twice and checked
+      # never — a header under two names, or a request body the route has never
+      # accepted, survives thousands of green mocked tests and is only found by
+      # an actual call through a running stack.
+      #
+      # `rehearse_integrations` derives its subject list from each
+      # `integrations/*_client.py` module's `__all__`, so a function with no
+      # caller is exercised anyway, and it fails closed if that derivation comes
+      # back empty.
+      - name: migrate and seed
+        run: |
+          docker compose exec -T bff python manage.py migrate --noinput
+          docker compose exec -T bff python manage.py createcachetable
+          docker compose exec -T bff python manage.py seed_dev
+
+      - name: call every function integrations/ exports, for real
+        run: docker compose exec -T bff python manage.py rehearse_integrations
+
       - name: stack logs
         if: failure()
         run: docker compose logs --tail 100

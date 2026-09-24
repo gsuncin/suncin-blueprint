@@ -3,9 +3,16 @@ name: release notes
 # The release note is written in the repo and lives there. Pushing the tag
 # publishes it. An agent starting cold in a fresh worktree reads releases/ from
 # disk — no API call, no token, no network.
+#
+# THE TRIGGER IS DELIBERATELY WIDER THAN THE FORMAT — `*` where the six hex
+# digits go — because a tag that matches NO pattern here produces no run at
+# all, not a failing one: the release just never appears, and nothing says so.
+# find-release-note.sh is where the format is enforced, as a red run somebody
+# sees. scripts/tests/find-release-note.test.sh reads this list and holds every
+# note in releases/ against it — change the list, and that test is the check.
 on:
   push:
-    tags: ["R-[0-9][0-9][0-9]"]
+    tags: ["R-[0-9][0-9][0-9]", "R-20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*"]
 
 permissions:
   contents: write
@@ -20,41 +27,33 @@ jobs:
 
       - name: find the note
         id: note
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          matches=(releases/${tag}-*.md)
-
-          # Numbers are never reused, so exactly one file must match. Zero
-          # means the tag was pushed before the note; two means a number was
-          # reused, and publishing either one would be wrong.
-          if [ ! -e "${matches[0]}" ]; then
-            echo "No releases/${tag}-*.md — write the note before tagging." >&2
-            exit 1
-          fi
-          if [ "${#matches[@]}" -ne 1 ]; then
-            echo "Expected exactly one note for ${tag}, found ${#matches[@]}." >&2
-            printf '%s\n' "${matches[@]}" >&2
-            exit 1
-          fi
-
-          echo "path=${matches[0]}" >> "$GITHUB_OUTPUT"
-          echo "title=$(head -1 "${matches[0]}" | sed 's/^#\+ *//')" >> "$GITHUB_OUTPUT"
+          .github/scripts/find-release-note.sh "$TAG" releases >> "$GITHUB_OUTPUT"
 
       - name: create or update the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Through `env:`, NEVER interpolated into the `run:` script below. A
+          # ${{ }} expression is pasted in as literal text before bash sees the
+          # script, so a title containing a quote or a backtick would be run as
+          # shell rather than passed as a string.
+          TAG: ${{ github.ref_name }}
+          NOTE_TITLE: ${{ steps.note.outputs.title }}
+          NOTE_PATH: ${{ steps.note.outputs.path }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          tag="$TAG"
           # Create-or-update, so re-running cannot produce two releases for one
-          # number.
+          # identifier.
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release edit "$tag" \
-              --title "${{ steps.note.outputs.title }}" \
-              --notes-file "${{ steps.note.outputs.path }}"
+              --title "$NOTE_TITLE" \
+              --notes-file "$NOTE_PATH"
           else
             gh release create "$tag" \
-              --title "${{ steps.note.outputs.title }}" \
-              --notes-file "${{ steps.note.outputs.path }}"
+              --title "$NOTE_TITLE" \
+              --notes-file "$NOTE_PATH"
           fi
