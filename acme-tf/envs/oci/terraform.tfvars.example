@@ -16,7 +16,7 @@ acme_email  = "ops@example.com"
 
 # Immutable tags. Never ":latest" — a box running "latest" cannot tell you what
 # it is running, and rollback becomes guesswork.
-image_gateway_auth = "registry.example.com/acme-auth:sha-abc1234"
+image_gateway_auth = "registry.example.com/acme-gateway-auth:sha-abc1234"
 image_bff          = "registry.example.com/acme-bff:sha-abc1234"
 image_web          = "registry.example.com/acme-web:sha-abc1234"
 image_svc_example  = "registry.example.com/acme-svc-example:sha-abc1234"

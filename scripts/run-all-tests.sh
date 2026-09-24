@@ -47,7 +47,24 @@ section "environment"
 printf '  DB_NAME=%s  (must be a SCRATCH database, never your dev data)\n' "$DB_NAME"
 printf '  DB_HOST=%s:%s\n' "$DB_HOST" "$DB_PORT"
 
-run "svc-example (pytest)"   acme-svc-example  .venv/bin/pytest -q
+# DERIVED, not listed. A script that names its subjects by hand goes on
+# reporting green about a stack that has grown past it: the service added after
+# the last edit is skipped in exactly the same way, and the summary still says
+# "All suites green".
+#
+# Fails closed if it finds nothing, because a loop over an empty list is a pass
+# that ran no tests, which is the shape of every version of this bug.
+svc_count=0
+for svc_dir in acme-svc-*/; do
+    svc="${svc_dir%/}"
+    run "${svc#acme-} (pytest)" "$svc" .venv/bin/pytest -q
+    svc_count=$((svc_count + 1))
+done
+if [ "$svc_count" -eq 0 ]; then
+    echo "FAIL  no acme-svc-* suite was found; refusing to report green"
+    exit 1
+fi
+
 run "gateway auth (pytest)"  acme-gateway/auth .venv/bin/pytest -q
 
 run "bff migrations"      acme-bff bash -c 'django migrate --noinput'

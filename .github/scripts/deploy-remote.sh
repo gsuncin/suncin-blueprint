@@ -3,6 +3,10 @@
 #
 #   ssh host env IMAGE_TAG=... bash -s < .github/scripts/deploy-remote.sh
 #
+# It also answers one question without touching a box, for CI:
+#
+#   .github/scripts/deploy-remote.sh --print-services <compose file>
+#
 # THE STDIN TRAP, which has cost a full afternoon and produced a silent
 # half-deploy that exited 0:
 #
@@ -16,9 +20,74 @@
 #   Every command below that could touch stdin therefore ends in `< /dev/null`.
 set -Eeuo pipefail
 
+# --- What this release is responsible for, derived once -----------------------
+#
+# THIS USED TO BE THE LITERAL LIST `bff web auth svc-example`, WRITTEN OUT FOUR
+# TIMES: for the rollback digest capture, the recreate, the health wait and the
+# rollback recreate. Add a microservice and no copy of the list learns about it,
+# so a deploy starts part of the stack and reports success — silently, because a
+# loop over a list that does not mention a service cannot fail on it.
+#
+# So the subjects are derived, in one place, and an empty derivation is a
+# failure rather than four loops that quietly run no iterations.
+#
+# The rule that makes one list correct for all four uses: a service this deploy
+# RE-TAGS is a service it must also pull, recreate and wait for. So the subjects
+# are exactly the services whose `image:` line the pinning sed below rewrites —
+# and both read the same $REGISTRY_HOST, so they cannot drift apart. Everything
+# else in the stack (traefik, postgres, rabbitmq, minio) comes from a public
+# registry at a version Terraform pins, and a release does not touch it.
+REGISTRY_HOST="${REGISTRY_HOST:-ghcr.io}"
+# The same value as a sed pattern. Unescaped, the `.` in `ghcr.io` is a
+# wildcard — harmless today and not something to leave for a registry whose
+# name has a hyphen or a port in it.
+REGISTRY_HOST_RE="${REGISTRY_HOST//./\\.}"
+
+release_services() {
+    # <compose file> -> one service name per line.
+    #
+    # awk, not `docker compose config`: this same function runs in CI (see
+    # --print-services below), where there is no docker daemon and none of the
+    # env files the compose file references exist, which is enough to make
+    # `docker compose config` refuse to parse it.
+    awk -v host="$REGISTRY_HOST" '
+        /^[[:space:]]*#/ { next }
+        /^services:[[:space:]]*$/ { in_services = 1; next }
+        # `volumes:` and `networks:` at column 0 end the services block.
+        /^[^[:space:]]/ { in_services = 0 }
+        !in_services { next }
+        # Only the two-space-indented keys are service names. `image:` and
+        # `networks:` inside a service are indented further.
+        /^  [A-Za-z0-9._-]+:[[:space:]]*$/ { service = $1; sub(/:$/, "", service); next }
+        # index(), not a regex: the host is data, and `ghcr.io` as a pattern
+        # also matches `ghcrxio`.
+        service != "" && $1 == "image:" && index($2, host "/") == 1 { print service }
+    ' "$1"
+}
+
+# `--print-services <compose file>` runs that derivation and NOTHING else — no
+# docker, no sudo, no box, no side effect. It exists so
+# .github/scripts/check-deploy-contract.sh can run the deploy's own code in CI
+# against the rendered production compose file, rather than grading a second
+# copy of the parser that could agree with the same bug.
+#
+# It has to come before IMAGE_TAG is required and before the logging redirect
+# below, both of which need a box.
+if [ "${1:-}" = "--print-services" ]; then
+    compose="${2:?--print-services needs the path to a compose file}"
+    services="$(release_services "$compose")"
+    if [ -z "$services" ]; then
+        echo "no service in ${compose} takes an image from ${REGISTRY_HOST}" >&2
+        exit 1
+    fi
+    printf '%s\n' "$services"
+    exit 0
+fi
+
 PROJECT="${PROJECT:-acme}"
 IMAGE_TAG="${IMAGE_TAG:?IMAGE_TAG is required; deploy an immutable tag, never latest}"
 INSTALL_DIR="/opt/${PROJECT}"
+COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
 LOG="/var/log/${PROJECT}-deploy.log"
 STATUS="${INSTALL_DIR}/deploy-status"
 
@@ -35,6 +104,16 @@ echo "=== $(date -Is) deploying ${IMAGE_TAG} ==="
 
 cd "$INSTALL_DIR"
 
+# The one list, for all four uses below. Fail closed: an empty derivation means
+# every loop that follows runs zero iterations and reports success.
+mapfile -t SERVICES < <(release_services "$COMPOSE_FILE")
+if [ "${#SERVICES[@]}" -eq 0 ]; then
+    echo "no service in ${COMPOSE_FILE} takes an image from ${REGISTRY_HOST};" >&2
+    echo "refusing to deploy nothing and call it a success" >&2
+    exit 1
+fi
+echo "--- this release covers: ${SERVICES[*]} ---"
+
 if [ "$IMAGE_TAG" = "latest" ]; then
     # A box running `latest` cannot tell you what it is running, and rollback
     # becomes guesswork about what `latest` pointed at yesterday.
@@ -49,7 +128,7 @@ echo "${REGISTRY_TOKEN}" | sudo docker login ghcr.io -u "${REGISTRY_USERNAME}" -
 echo "--- capturing current image digests for rollback ---"
 ROLLBACK_FILE="${INSTALL_DIR}/rollback-images"
 sudo rm -f "$ROLLBACK_FILE"
-for service in bff web auth svc-example; do
+for service in "${SERVICES[@]}"; do
     digest="$(sudo docker inspect --format '{{index .RepoDigests 0}}' \
               "${PROJECT}-${service}" 2>/dev/null || echo "")"
     [ -n "$digest" ] && echo "${service}=${digest}" | sudo tee -a "$ROLLBACK_FILE" > /dev/null
@@ -58,8 +137,8 @@ sudo cat "$ROLLBACK_FILE" 2>/dev/null || echo "(nothing running yet)"
 
 # --- Point the compose file at the new tag ------------------------------------
 echo "--- pinning images to ${IMAGE_TAG} ---"
-sudo sed -i -E "s#(image: ghcr\.io/[^:[:space:]]+):[^[:space:]]+#\1:${IMAGE_TAG}#" docker-compose.yml
-grep -n 'image: ghcr.io' docker-compose.yml
+sudo sed -i -E "s#(image: ${REGISTRY_HOST_RE}/[^:[:space:]]+):[^[:space:]]+#\1:${IMAGE_TAG}#" "$COMPOSE_FILE"
+grep -n "image: ${REGISTRY_HOST}" "$COMPOSE_FILE"
 
 echo "--- pulling ---"
 sudo docker compose pull < /dev/null
@@ -75,7 +154,11 @@ echo "--- migrations ---"
 sudo docker compose run --rm -T bff python manage.py migrate --noinput < /dev/null
 
 echo "--- recreating application containers ---"
-sudo docker compose up -d --no-deps --force-recreate bff worker web auth svc-example < /dev/null
+# `worker` is in SERVICES on its own merit: the production template gives it its
+# own `image: ${image_bff}` line, so the derivation finds it. That is the point
+# of deriving from the image lines rather than from a role — a service the
+# release re-tags is a service the release restarts, with no list to maintain.
+sudo docker compose up -d --no-deps --force-recreate "${SERVICES[@]}" < /dev/null
 
 # --- Wait for health, THEN reload the proxy -----------------------------------
 # The containers just got new IPs. Traefik resolved the old ones and holds
@@ -86,7 +169,7 @@ echo "--- waiting for health ---"
 deadline=$((SECONDS + 120))
 while [ "$SECONDS" -lt "$deadline" ]; do
     unhealthy=""
-    for service in bff web auth svc-example; do
+    for service in "${SERVICES[@]}"; do
         state="$(sudo docker inspect -f '{{.State.Health.Status}}' \
                  "${PROJECT}-${service}" 2>/dev/null || echo unknown)"
         [ "$state" = "healthy" ] || unhealthy="${unhealthy} ${service}:${state}"
@@ -102,10 +185,10 @@ if [ -n "$unhealthy" ]; then
     if [ -s "$ROLLBACK_FILE" ]; then
         while IFS='=' read -r service digest; do
             echo "  restoring ${service} -> ${digest}"
-            sudo sed -i -E "s#(image: ghcr\.io/[^[:space:]]*${service}):[^[:space:]]+#${digest}#" \
-                docker-compose.yml
+            sudo sed -i -E "s#(image: ${REGISTRY_HOST_RE}/[^[:space:]]*${service}):[^[:space:]]+#${digest}#" \
+                "$COMPOSE_FILE"
         done < "$ROLLBACK_FILE"
-        sudo docker compose up -d --no-deps --force-recreate bff web auth svc-example < /dev/null
+        sudo docker compose up -d --no-deps --force-recreate "${SERVICES[@]}" < /dev/null
         echo "$(date -Is) deploy ROLLED BACK from ${IMAGE_TAG}" | sudo tee "$STATUS"
     else
         echo "no previous digests recorded; cannot roll back automatically"

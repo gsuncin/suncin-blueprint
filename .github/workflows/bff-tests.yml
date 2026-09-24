@@ -73,12 +73,43 @@ jobs:
       - run: python manage.py makemigrations --check --dry-run
         working-directory: acme-bff
 
-      - run: python manage.py check --deploy --fail-level ERROR
+      - name: check --deploy
         working-directory: acme-bff
+        # The key is GENERATED HERE, not carried as a repository secret.
+        # `secrets.CI_JWT_PRIVATE_KEY_B64` is the kind of secret nobody
+        # remembers to set: the step then reads an empty string and fails
+        # unconditionally with "JWT_PRIVATE_KEY_B64 is required when DEBUG is
+        # off" — invisibly, because this workflow is path-filtered on
+        # acme-bff/** and a run only happens when someone touches the BFF.
+        #
+        # `check --deploy` starts the process and signs nothing, so a throwaway
+        # key is not a weaker version of a real one; it is the honest
+        # expression of what this step needs. A real secret in a workflow file
+        # would be a secret published for no benefit.
+        run: |
+          set -euo pipefail
+          JWT_PRIVATE_KEY_B64="$(openssl genpkey -algorithm RSA \
+            -pkeyopt rsa_keygen_bits:2048 2>/dev/null | base64 -w0)"
+          export JWT_PRIVATE_KEY_B64
+          python manage.py check --deploy --fail-level ERROR
         env:
           DEBUG: "False"
           ALLOWED_HOSTS: app.example.com
-          JWT_PRIVATE_KEY_B64: ${{ secrets.CI_JWT_PRIVATE_KEY_B64 }}
+          # Object storage. The composition root refuses to start without these
+          # four, which is the feature — and it means adding a required setting
+          # is also a change to THIS step. A local run has DEBUG=True and never
+          # reaches the refusal, so the local suite goes green and CI goes red
+          # in under a minute; that asymmetry is the point of the step.
+          #
+          # Values are throwaway. `check --deploy` starts the process and talks
+          # to no object store, so a real credential here would be a secret
+          # published for no benefit. STORAGE_BUCKET_PUBLIC is absent on
+          # purpose: nothing requires it, and core/tests_storage.py asserts
+          # both directions.
+          STORAGE_ENDPOINT: http://minio.invalid:9000
+          STORAGE_ACCESS_KEY: check-deploy-only
+          STORAGE_SECRET_KEY: ${{ github.run_id }}-check-deploy-only
+          STORAGE_BUCKET_PRIVATE: check-deploy-only
 
       - run: python manage.py test --verbosity 2
         working-directory: acme-bff

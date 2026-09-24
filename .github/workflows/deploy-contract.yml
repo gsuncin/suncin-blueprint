@@ -1,0 +1,73 @@
+name: deploy contract
+
+# THE TRIGGER IS HALF THE CHECK. The usual way this kind of check dies is a
+# path filter narrower than what the check reads: it lives under `acme-bff/**`,
+# it reads docker-compose.yml, and editing the compose file alone runs nothing
+# that could see the breakage. Every path this check READS is listed here, on
+# both events — the deploy script, the workflows whose image names it compares,
+# the Terraform template and environment it derives the service list from, and
+# the secrets manifest. Adding an input to check-deploy-contract.sh means adding
+# a line here.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/scripts/deploy-remote.sh"
+      - ".github/scripts/diagnose-remote.sh"
+      - ".github/scripts/check-deploy-contract.sh"
+      - ".github/workflows/deploy-contract.yml"
+      - ".github/workflows/deploy-prod.yml"
+      - ".github/workflows/diagnose-prod.yml"
+      - ".github/workflows/docker-*.yml"
+      - ".github/SECRETS.md"
+      - "acme-tf/**"
+      - "docker-compose.yml"
+      - "acme-svc-*/Dockerfile"
+  pull_request:
+    paths:
+      - ".github/scripts/deploy-remote.sh"
+      - ".github/scripts/diagnose-remote.sh"
+      - ".github/scripts/check-deploy-contract.sh"
+      - ".github/workflows/deploy-contract.yml"
+      - ".github/workflows/deploy-prod.yml"
+      - ".github/workflows/diagnose-prod.yml"
+      - ".github/workflows/docker-*.yml"
+      - ".github/SECRETS.md"
+      - "acme-tf/**"
+      - "docker-compose.yml"
+      - "acme-svc-*/Dockerfile"
+
+permissions:
+  contents: read
+
+# Its own group, not shared with `terraform`. Two workflows in one group with
+# cancel-in-progress kill each other's runs and leave a red check that was
+# cancelled in two seconds, which is how a team learns to ignore red checks.
+concurrency:
+  group: deploy-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      # The rendered production compose file, from the same module the box
+      # gets. `-backend=false` because this needs no state and no credentials.
+      - name: render the production compose file
+        run: |
+          set -euo pipefail
+          terraform -chdir=acme-tf/tests/render init -backend=false -input=false
+          terraform -chdir=acme-tf/tests/render apply -auto-approve -input=false
+          terraform -chdir=acme-tf/tests/render output -raw compose_file > /tmp/prod-compose.yml
+          test -s /tmp/prod-compose.yml
+
+      - name: the deploy path covers the whole stack
+        run: .github/scripts/check-deploy-contract.sh /tmp/prod-compose.yml

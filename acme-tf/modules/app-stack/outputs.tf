@@ -13,3 +13,19 @@ output "cloud_init_gzipped" {
 output "install_dir" {
   value = "/opt/${var.project}"
 }
+
+# Re-exported so the shell-level checks can read the SAME text that lands on
+# the box, from a directory that needs no credentials and no state backend:
+#
+#   terraform -chdir=acme-tf/tests/render output -raw compose_file > /tmp/c.yml
+#   .github/scripts/check-deploy-contract.sh /tmp/c.yml
+#
+# Deliberately NOT sensitive, and that is enforcement rather than a label: the
+# production compose file carries no secret — every container reads one 0600
+# env file that the bootstrap writes — so the moment a secret is interpolated
+# into the template this output becomes unreadable by `terraform output -raw`
+# and the render tests go red.
+output "compose_file" {
+  description = "Rendered /opt/<project>/docker-compose.yml. Secrets live in the env files it references, never in the file itself."
+  value       = local.compose_file
+}

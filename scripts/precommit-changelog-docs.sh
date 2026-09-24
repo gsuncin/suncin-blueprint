@@ -17,7 +17,12 @@ git diff --cached --name-only | grep -qx "$CHANGELOG" && exit 0
 
 # Derive affected areas by path prefix, in a fixed order so the line is stable.
 areas=""
-for prefix in acme-gateway acme-bff acme-svc-example acme-web acme-tf \
+# The microservices are DERIVED. A hardcoded `acme-svc-example` here stops
+# attributing a changed area the day a second service exists — the same defect,
+# in miniature, that this repo removed from the CI matrices and the deploy.
+svc_prefixes="$(ls -d acme-svc-*/ 2>/dev/null | sed 's#/$##' | paste -sd' ' -)"
+# shellcheck disable=SC2086
+for prefix in acme-gateway acme-bff $svc_prefixes acme-web acme-tf \
               .github .claude specs releases scripts; do
     if printf '%s\n' "$staged" | grep -q "^$prefix/"; then
         areas="${areas:+$areas, }$prefix"
@@ -48,8 +53,21 @@ entry="
 - Docs: Review required. Replace this note with the documentation decision before committing.
 "
 
-awk -v entry="$entry" '
-    NR == 1 && /^# Changelog/ { print; print entry; next }
+# NOT `awk -v entry="$entry"`: a literal newline in a -v assignment is an error
+# on BSD awk ("awk: newline in string"), so that spelling aborted every commit
+# on macOS rather than stamping anything — a hook that fails closed on the
+# wrong thing. The entry is read from a file instead, which has no such rule.
+entry_file="$(mktemp)"
+trap 'rm -f "$entry_file" "$CHANGELOG.tmp"' EXIT
+printf '%s\n' "$entry" > "$entry_file"
+
+awk -v entry_file="$entry_file" '
+    NR == 1 && /^# Changelog/ {
+        print
+        while ((getline line < entry_file) > 0) print line
+        close(entry_file)
+        next
+    }
     { print }
 ' "$CHANGELOG" > "$CHANGELOG.tmp"
 mv "$CHANGELOG.tmp" "$CHANGELOG"

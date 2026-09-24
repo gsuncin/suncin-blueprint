@@ -1,5 +1,13 @@
 # workflow_call ONLY. See bff-tests.yml for why a second trigger breaks this.
-name: svc-example tests
+#
+# THE SERVICE LIST IS DERIVED, NOT TYPED. This workflow was called
+# "svc-example tests" and ran `pytest` in one hardcoded directory, so a second
+# microservice could be built, tested and released without CI ever running its
+# suite once. That is the same defect shape that lets run-all-tests.sh report
+# "All suites green" while skipping a whole project, and lets
+# verify-isolation.sh pass about a stack containing services it has never heard
+# of. Derive the set; fail closed when the derivation comes back empty.
+name: microservice tests
 
 on:
   workflow_dispatch: {}
@@ -13,9 +21,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      services: ${{ steps.find.outputs.services }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: find
+        # Every acme-svc-* directory that actually has a test suite. A new
+        # service is picked up by existing, with no workflow edit.
+        run: |
+          set -euo pipefail
+          services=$(ls -d acme-svc-*/ 2>/dev/null | sed 's#/$##' | jq -R . | jq -sc .)
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+          echo "discovered: $services"
+          # Fail closed. An empty matrix is a workflow that passes having run
+          # nothing, which is exactly the failure this file exists to end.
+          [ "$services" != "[]" ] || { echo "::error::no acme-svc-* directories found"; exit 1; }
+
   pytest:
+    needs: discover
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.discover.outputs.services) }}
 
     steps:
       - uses: actions/checkout@v5
@@ -24,10 +56,13 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: acme-svc-example/requirements-dev.txt
+          cache-dependency-path: ${{ matrix.service }}/requirements-dev.txt
 
       - run: pip install -r requirements-dev.txt
-        working-directory: acme-svc-example
+        working-directory: ${{ matrix.service }}
 
-      - run: pytest -q
-        working-directory: acme-svc-example
+      # `-p no:cacheprovider` keeps a stale .pytest_cache out of the matrix's
+      # shared checkout. The `cd` is what `working-directory` gives us, and it
+      # is load-bearing: pytest from the repo root fails collection.
+      - run: pytest -q -p no:cacheprovider
+        working-directory: ${{ matrix.service }}

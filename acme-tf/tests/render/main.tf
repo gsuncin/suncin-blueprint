@@ -24,10 +24,15 @@ module "under_test" {
   domain_apex = "example.test"
   acme_email  = "ops@example.test"
 
-  image_gateway_auth = "example.test/auth:sha-0000000"
-  image_bff          = "example.test/bff:sha-0000000"
-  image_web          = "example.test/web:sha-0000000"
-  image_svc_example  = "example.test/svc:sha-0000000"
+  # ghcr.io, and the same image names CI publishes. Not decoration: the deploy
+  # derives the release's service list from the RENDERED compose file by
+  # matching the registry host, so a fixture that renders `example.test/...`
+  # makes that derivation come back empty and
+  # .github/scripts/check-deploy-contract.sh has nothing to compare.
+  image_gateway_auth = "ghcr.io/example/acme-gateway-auth:sha-0000000"
+  image_bff          = "ghcr.io/example/acme-bff:sha-0000000"
+  image_web          = "ghcr.io/example/acme-web:sha-0000000"
+  image_svc_example  = "ghcr.io/example/acme-svc-example:sha-0000000"
 
   registry_username = "render-test"
   registry_token    = "render-test-token"
@@ -96,4 +101,17 @@ output "assertions" {
     # Most providers cap user_data at 32 KB. The gzipped form is what ships.
     gzipped_bytes = length(nonsensitive(module.under_test.cloud_init_gzipped))
   }
+}
+
+# The file the deploy script parses on the box:
+#
+#   terraform -chdir=acme-tf/tests/render output -raw compose_file > /tmp/c.yml
+#   .github/scripts/check-deploy-contract.sh /tmp/c.yml
+#
+# That check derives the release's service list from this text using
+# deploy-remote.sh's own code, and compares it with the list derived from the
+# template. Two sources, two parsers — the deploy used to name its subjects by
+# hand, and the hand-typed list was already missing one.
+output "compose_file" {
+  value = module.under_test.compose_file
 }
