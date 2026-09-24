@@ -65,6 +65,12 @@ ${traefik_routers}
       RABBITMQ_DEFAULT_USER=${rabbitmq_user}
       RABBITMQ_DEFAULT_PASS=${rabbitmq_password}
 
+  - path: /opt/${project}/secrets/minio.env
+    permissions: "0600"
+    content: |
+      MINIO_ROOT_USER=${storage_access_key}
+      MINIO_ROOT_PASSWORD=${storage_secret_key}
+
   - path: /opt/${project}/secrets/app.env
     permissions: "0600"
     content: |
@@ -94,6 +100,16 @@ ${traefik_routers}
       EXAMPLE_SERVICE_JWT_AUDIENCE=${project}-svc-example
 
       PROVIDER_CREDENTIAL_ENCRYPTION_KEY=${provider_credential_encryption_key}
+
+      # The composition root refuses to start without the first four. That
+      # refusal is the feature: a default would turn "nobody configured
+      # storage" into "files silently went to the wrong bucket".
+      STORAGE_ENDPOINT=http://minio:9000
+      STORAGE_ACCESS_KEY=${storage_access_key}
+      STORAGE_SECRET_KEY=${storage_secret_key}
+      STORAGE_BUCKET_PRIVATE=${project}-private
+      STORAGE_REGION=us-east-1
+      STORAGE_SIGNED_URL_TTL_SECONDS=300
 
       SENTRY_DSN=${sentry_dsn}
       SENTRY_ENVIRONMENT=${sentry_environment}

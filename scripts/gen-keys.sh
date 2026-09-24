@@ -57,5 +57,16 @@ set_secret EXAMPLE_SERVICE_JWT_SECRET "openssl rand -hex 32"
 
 set_secret SECRET_KEY "openssl rand -base64 48 | tr -d '\n'"
 
+# Object storage. These are BOTH the BFF's credentials and MinIO's root
+# credentials -- docker-compose.yml reads the same two variables for
+# MINIO_ROOT_USER/MINIO_ROOT_PASSWORD -- so they are one value in two places by
+# construction rather than by remembering. Changing them means recreating the
+# minio container, not only restarting the BFF.
+#
+# Alphanumeric: MinIO's root user is also a login name, and a `/` or `+` out of
+# base64 lands in URLs and in `mc alias` arguments.
+set_secret STORAGE_ACCESS_KEY "openssl rand -hex 12"
+set_secret STORAGE_SECRET_KEY "openssl rand -hex 32"
+
 echo
 echo "Done. $ENV_FILE is gitignored and must stay that way."

@@ -118,6 +118,18 @@ variable "provider_credential_encryption_key" {
   sensitive = true
 }
 
+variable "storage_access_key" {
+  description = "Object store access key, and MinIO's root user."
+  type        = string
+  sensitive   = true
+}
+
+variable "storage_secret_key" {
+  description = "Object store secret key, and MinIO's root password."
+  type        = string
+  sensitive   = true
+}
+
 variable "tailscale_authkey" {
   description = "Use a REUSABLE key. A single-use key is consumed on first boot, so rebuilding the box joins nothing and you have locked yourself out."
   type        = string

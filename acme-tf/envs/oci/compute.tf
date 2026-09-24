@@ -35,6 +35,8 @@ module "app_stack" {
   service_jwt_secret                 = var.service_jwt_secret
   provider_credential_encryption_key = var.provider_credential_encryption_key
 
+  storage_access_key = var.storage_access_key
+  storage_secret_key = var.storage_secret_key
   tailscale_authkey  = var.tailscale_authkey
   sentry_dsn         = var.sentry_dsn
   sentry_environment = var.sentry_environment

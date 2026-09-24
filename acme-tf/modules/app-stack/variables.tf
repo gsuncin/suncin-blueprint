@@ -43,6 +43,14 @@ variable "postgres_version" {
   default = "16-alpine"
 }
 
+# quay.io, not Docker Hub: `minio/minio` no longer exists there -- the
+# repository 404s, not just the tag. The registry host is in the compose
+# template; this is only the tag.
+variable "minio_version" {
+  type    = string
+  default = "RELEASE.2025-09-07T16-13-09Z"
+}
+
 variable "postgres_db" {
   type    = string
   default = "acme"
@@ -94,6 +102,18 @@ variable "service_jwt_secret" {
 
 variable "provider_credential_encryption_key" {
   description = "Fernet key for per-tenant provider credentials at rest. NEVER shared across environments: a staging leak must not decrypt production."
+  type        = string
+  sensitive   = true
+}
+
+variable "storage_access_key" {
+  description = "Object store access key. Also MinIO's root user, so it is one value in two places by construction rather than by remembering."
+  type        = string
+  sensitive   = true
+}
+
+variable "storage_secret_key" {
+  description = "Object store secret key, and MinIO's root password. Rotating it means recreating the minio container, not only redeploying the BFF."
   type        = string
   sensitive   = true
 }

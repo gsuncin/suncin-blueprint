@@ -158,9 +158,36 @@ services:
       retries: 5
     networks: [data]
 
+  minio:
+    # quay.io, MinIO's own registry: `minio/minio` no longer exists on Docker
+    # Hub — the repository 404s, not just the tag. Same image, same tag.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: acme-minio
+    restart: unless-stopped
+    logging: *default-logging
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-acme}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-acme-dev-secret}
+    volumes:
+      - minio-data:/data
+    # `mc` ships inside the image; curl does not, and a healthcheck written
+    # against curl reports unhealthy forever on a container that is fine.
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # `data`, with postgres and rabbitmq: object storage holds tenant files and
+    # has no business making, or receiving, a connection off the box. The
+    # network is `internal: true`, so that is structural rather than a matter of
+    # trust — and verify-isolation.sh asserts it from both sides.
+    networks: [data]
+
 volumes:
   pgdata:
   rabbitmq-data:
+  minio-data:
 
 networks:
   # Anything the gateway must reach. Only traefik publishes a port here.

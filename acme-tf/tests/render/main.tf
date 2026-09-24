@@ -48,6 +48,8 @@ module "under_test" {
   gateway_token                      = "gate$way-token"
   service_jwt_secret                 = "svc$jwt-secret"
   provider_credential_encryption_key = "fern3t$key-with-dollar="
+  storage_access_key = "render-test-access"
+  storage_secret_key = "render-test-secret"
 
   tailscale_authkey = "tskey-auth-$example"
   data_device       = "/dev/sdb"

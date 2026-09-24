@@ -84,6 +84,18 @@ variable "provider_credential_encryption_key" {
   sensitive = true
 }
 
+variable "storage_access_key" {
+  description = "Object store access key, and MinIO's root user."
+  type        = string
+  sensitive   = true
+}
+
+variable "storage_secret_key" {
+  description = "Object store secret key, and MinIO's root password."
+  type        = string
+  sensitive   = true
+}
+
 variable "data_device" {
   description = "Block device for the data volume, e.g. /dev/sdb. Empty stores data on the root filesystem, which is only acceptable for a throwaway environment."
   type        = string
@@ -114,6 +126,8 @@ module "app_stack" {
   service_jwt_secret                 = var.service_jwt_secret
   provider_credential_encryption_key = var.provider_credential_encryption_key
 
+  storage_access_key = var.storage_access_key
+  storage_secret_key = var.storage_secret_key
   data_device = var.data_device
 }
 

@@ -124,6 +124,29 @@ services:
       retries: 5
     networks: [data]
 
+  minio:
+    # quay.io, MinIO's own registry: `minio/minio` no longer exists on Docker
+    # Hub -- the repository 404s, not just the tag. Pinned here rather than
+    # passed as an image variable on purpose: a release does not rebuild it, so
+    # it must not be one of the services deploy-remote.sh re-tags.
+    image: quay.io/minio/minio:${minio_version}
+    container_name: ${project}-minio
+    restart: unless-stopped
+    logging: *default-logging
+    command: server /data --console-address ":9001"
+    env_file:
+      - /opt/${project}/secrets/minio.env
+    volumes:
+      - ${data_root}/minio:/data
+    # `mc` ships inside the image; curl does not, and a healthcheck written
+    # against curl reports unhealthy forever on a container that is fine.
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [data]
+
 networks:
   edge:
     driver: bridge
@@ -132,8 +155,8 @@ networks:
   # router, and ufw allows only 80/443 inbound.
   services:
     driver: bridge
-  # internal: true — no route in, no route out. Postgres and RabbitMQ have no
-  # business making outbound connections.
+  # internal: true — no route in, no route out. Postgres, RabbitMQ and the
+  # object store have no business making outbound connections.
   data:
     driver: bridge
     internal: true
