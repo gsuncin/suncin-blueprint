@@ -128,7 +128,7 @@ module "app_stack" {
 
   storage_access_key = var.storage_access_key
   storage_secret_key = var.storage_secret_key
-  data_device = var.data_device
+  data_device        = var.data_device
 }
 
 resource "null_resource" "provision" {

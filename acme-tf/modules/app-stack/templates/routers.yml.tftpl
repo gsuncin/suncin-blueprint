@@ -26,7 +26,7 @@ http:
       rule: "Host(`${domain_app}`) && Path(`/api/.well-known/jwks.json`)"
       priority: 890
       entryPoints: [websecure]
-      middlewares: [security-headers]
+      middlewares: [jwks-chain]
       service: bff
       tls: {certResolver: letsencrypt}
 
@@ -34,6 +34,7 @@ http:
       rule: "Host(`${domain_app}`) && Path(`/api/health`)"
       priority: 880
       entryPoints: [websecure]
+      middlewares: [health-chain]
       service: bff
       tls: {certResolver: letsencrypt}
 
@@ -41,7 +42,7 @@ http:
       rule: "Host(`${domain_app}`) && PathPrefix(`/api/webhooks/`)"
       priority: 870
       entryPoints: [websecure]
-      middlewares: [security-headers, ratelimit-webhook]
+      middlewares: [webhook-chain]
       service: bff
       tls: {certResolver: letsencrypt}
 
@@ -77,7 +78,7 @@ http:
       rule: "Host(`${domain_apex}`) || Host(`www.${domain_apex}`)"
       priority: 100
       entryPoints: [websecure]
-      middlewares: [security-headers-apex, compress, ratelimit-app]
+      middlewares: [landing-chain]
       service: web
       tls: {certResolver: letsencrypt}
 

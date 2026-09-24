@@ -38,7 +38,7 @@ http:
       rule: "Host(`app.localhost`) && Path(`/api/.well-known/jwks.json`)"
       priority: 890
       entryPoints: [web]
-      middlewares: [security-headers]
+      middlewares: [jwks-chain]
       service: bff
 
     # 880 — unauthenticated on purpose. A health check behind auth tells you
@@ -47,6 +47,7 @@ http:
       rule: "Host(`app.localhost`) && Path(`/api/health`)"
       priority: 880
       entryPoints: [web]
+      middlewares: [health-chain]
       service: bff
 
     # 870 — provider webhooks. Unauthenticated (the provider has no token) and
@@ -59,7 +60,7 @@ http:
       rule: "Host(`app.localhost`) && PathPrefix(`/api/webhooks/`)"
       priority: 870
       entryPoints: [web]
-      middlewares: [security-headers, ratelimit-webhook]
+      middlewares: [webhook-chain]
       service: bff
 
     # 800 — the third-party API. Separate prefix so its auth, its limits and
@@ -94,7 +95,7 @@ http:
       rule: "Host(`acme.localhost`) || Host(`www.acme.localhost`)"
       priority: 100
       entryPoints: [web]
-      middlewares: [security-headers-apex, compress, ratelimit-app]
+      middlewares: [landing-chain]
       service: web
 
   services:

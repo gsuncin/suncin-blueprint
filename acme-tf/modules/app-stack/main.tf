@@ -48,8 +48,8 @@ locals {
     gateway_token                      = var.gateway_token
     service_jwt_secret                 = var.service_jwt_secret
     provider_credential_encryption_key = var.provider_credential_encryption_key
-    storage_access_key = var.storage_access_key
-    storage_secret_key = var.storage_secret_key
+    storage_access_key                 = var.storage_access_key
+    storage_secret_key                 = var.storage_secret_key
     sentry_dsn                         = var.sentry_dsn
     loki_password                      = var.loki_password
     registry_token                     = var.registry_token

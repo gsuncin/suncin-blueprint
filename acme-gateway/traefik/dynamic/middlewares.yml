@@ -36,6 +36,26 @@ http:
         customRequestHeaders:
           X-Required-Scope: "records:read"
 
+    # The identity headers, removed from anything a client sent.
+    #
+    # On the authenticated chains, `forward-auth`'s authResponseHeaders is what
+    # makes these trustworthy: the auth service's values REPLACE whatever the
+    # client supplied. A chain without forward-auth has no such replacement --
+    # and then a stranger can simply set `X-Auth-Account-Id` and hand it to the
+    # BFF.
+    #
+    # An empty value is how Traefik deletes a request header. A component that
+    # does not read these today is not a reason to forward them: "nothing reads
+    # it yet" is not a security boundary, and the component that starts reading
+    # it will not think to check the edge.
+    strip-identity-headers:
+      headers:
+        customRequestHeaders:
+          X-Auth-User-Id: ""
+          X-Auth-Account-Id: ""
+          X-Auth-Scopes: ""
+          X-Gateway-Token: ""
+
     # --- Rate limits -------------------------------------------------------
     # Per purpose, not one global limit: a login attempt and a page load have
     # nothing in common, and a single limit is either useless against
@@ -83,6 +103,18 @@ http:
         sourceRange:
           - "255.255.255.255/32"
 
+    # Health and JWKS: unauthenticated by necessity, not unlimited by
+    # necessity. A health endpoint that runs a `SELECT 1` on a pooled
+    # connection per request means an unauthenticated caller at line rate
+    # consumes a Postgres connection and a worker ahead of every rate-limited
+    # route. Generous enough that a monitor polling once a second is never
+    # refused.
+    ratelimit-health:
+      rateLimit:
+        average: 60
+        period: 1m
+        burst: 20
+
     # --- Response headers --------------------------------------------------
     security-headers:
       headers:
@@ -91,7 +123,14 @@ http:
         contentTypeNosniff: true
         browserXssFilter: true
         frameDeny: true
-        referrerPolicy: "same-origin"
+        # strict-origin, never a policy that sends the path. A password-reset
+        # link is /reset/<uid>/<token>; with a full-URL policy on same-origin
+        # requests, the SPA's boot-time token refresh carries that URL as its
+        # Referer -- before the page can set anything of its own -- and the
+        # token lands in the BFF's request logs (C-3). strict-origin sends the
+        # origin only, and Django's CSRF Referer check compares scheme and host
+        # only, so it still passes.
+        referrerPolicy: "strict-origin"
         customResponseHeaders:
           Permissions-Policy: "camera=(), geolocation=(), microphone=()"
           Content-Security-Policy: >-
@@ -113,7 +152,8 @@ http:
         stsIncludeSubdomains: false
         contentTypeNosniff: true
         frameDeny: true
-        referrerPolicy: "same-origin"
+        # Same policy and same reason as security-headers above.
+        referrerPolicy: "strict-origin"
         customResponseHeaders:
           Server: ""
           X-Powered-By: ""
@@ -126,9 +166,19 @@ http:
           - image/webp
 
     # --- Chains ------------------------------------------------------------
+    #
+    # THE INVARIANT: every chain either authenticates (forward-auth, whose
+    # authResponseHeaders replace whatever the client sent) or strips the
+    # identity headers explicitly. No exceptions -- a rule with one documented
+    # exception is a rule that grows a second one, and
+    # scripts/verify-isolation.sh check 4b fails the build on any chain that
+    # has neither.
+    #
+    # The static chains below serve files from the `web` container, which reads
+    # no identity header. They strip anyway, for the reason above.
     app-chain:
       chain:
-        middlewares: [security-headers, compress, ratelimit-app]
+        middlewares: [security-headers, compress, ratelimit-app, strip-identity-headers]
 
     api-chain:
       chain:
@@ -136,7 +186,29 @@ http:
 
     auth-chain:
       chain:
-        middlewares: [security-headers, ratelimit-auth]
+        middlewares: [security-headers, ratelimit-auth, strip-identity-headers]
+
+    # The apex takes security-headers-apex, whose HSTS omits includeSubDomains:
+    # that host is the parent of every future subdomain and the directive would
+    # force HTTPS on names that have no certificate yet.
+    landing-chain:
+      chain:
+        middlewares: [security-headers-apex, compress, ratelimit-app, strip-identity-headers]
+
+    # Health and JWKS. Unauthenticated on purpose, so they strip.
+    health-chain:
+      chain:
+        middlewares: [security-headers, ratelimit-health, strip-identity-headers]
+
+    jwks-chain:
+      chain:
+        middlewares: [security-headers, ratelimit-health, strip-identity-headers]
+
+    # A webhook is authenticated by its signature inside the BFF, never by the
+    # edge -- so as far as the identity headers are concerned it is a stranger.
+    webhook-chain:
+      chain:
+        middlewares: [security-headers, ratelimit-webhook, strip-identity-headers]
 
     public-api-chain:
       chain:
