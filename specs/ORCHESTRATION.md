@@ -39,6 +39,30 @@ from this file yet; `specs/` contains only the template.
 5. **TDD is mandatory and a green suite is the exit gate (C-8). Blocked is not
    done.**
 
+## An uncommitted worktree is the most reliable way to lose work
+
+**A worktree is not storage. Commit before you report, and never remove a
+worktree without looking inside it.**
+
+An agent finishes, writes a summary, and the worktree is cleaned up — with
+uncommitted changes in it. The summary describes work that no longer exists,
+and it reads exactly like work that does. This is the single most repeatable
+way to lose a day here, which is why `scripts/hooks/warn-uncommitted-on-stop.sh`
+blocks on a dirty tree rather than trusting anyone to remember.
+
+`wip(scope):` is an honest subject line. An imperfect commit is recoverable;
+a deleted worktree is not.
+
+## Keeping `staging` current across machines and agents
+
+A worktree-isolated agent branches from `staging` (RELEASES.md, the two-branch
+flow). If `staging` is stale, every agent launched from it is working against a
+tree that is missing the last release — and a prompt written against your
+branch describes a repository the agent is not looking at.
+
+So: fetch and fast-forward `staging` before launching a wave, not after
+something looks wrong.
+
 ## Branching: how a wave is actually run
 
 **An agent with `isolation: "worktree"` branches from `main`, never from the

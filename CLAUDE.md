@@ -26,7 +26,10 @@ produced a duplicate, and one of them landed *behind* what `main` already had.
    exit gate · **C-11** fewer, larger, well-named functions · **C-12** the
    gateway is the only ingress.
 2. **The workstream file for your task**, in `specs/` — checked against
-   `releases/` per the section above.
+   `releases/` per the section above. `specs/` holds only what is still open;
+   the closed half is in [`history/`](history/), a sibling of `releases/`, with
+   the full text and nothing summarised. **A spec changes folder the moment it
+   ships**, in the same PR as the release note, not as a followup.
 3. **[specs/ORCHESTRATION.md](specs/ORCHESTRATION.md)** — if you are launching
    or sequencing agents.
 
@@ -142,10 +145,24 @@ removed. Everyone who cloned the repo still has it.
   code, or resolve it with a reply saying why no change is needed. An open
   thread you have not answered blocks the merge; see
   [specs/RELEASES.md](specs/RELEASES.md#before-you-merge-review-comments-are-a-gate).
+- **Branch from `staging`, one workstream per PR; `staging` merges to `main`
+  a release at a time.** See
+  [RELEASES → the two-branch flow](specs/RELEASES.md#the-two-branch-flow) for
+  why, and for what each merge costs. A feature PR still carries everything it
+  always did; what changed is where it lands.
+- **A worktree is not storage. Commit before you report, and never remove a
+  worktree without looking inside it** — see
+  [ORCHESTRATION](specs/ORCHESTRATION.md#an-uncommitted-worktree-is-the-most-reliable-way-to-lose-work).
+  A Stop hook blocks on a dirty tree rather than trusting anyone to remember.
+- **A red suite is information; a fudged green one is a lie.** If a suite
+  cannot be made green, the task is blocked, not done. Report it with the
+  failure output and stop. Never weaken an assertion to accommodate a change —
+  if a merge makes an assertion fail, decide whether the assertion or the code
+  is wrong, and say which.
 - **One agent per project at a time.** Parallelism comes from agents working in
   *different* projects. Two agents in `acme-bff` will conflict.
-- **A worktree-isolated agent branches from `main`, not from your branch.** If
-  `main` is behind, the agent cannot see your unmerged work, and a prompt
+- **A worktree-isolated agent branches from `staging`, not from your branch.**
+  If `staging` is behind, the agent cannot see your unmerged work, and a prompt
   written against your branch describes a repository it is not looking at. Keep
   `main` current instead of working around this.
 - **Do not fabricate provider behaviour** (C-10). A field name, limit, or

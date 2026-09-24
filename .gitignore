@@ -30,6 +30,12 @@ htmlcov/
 *.egg-info/
 
 # --- Node -------------------------------------------------------------------
+# A PATTERN WITHOUT A LEADING SLASH MATCHES AT ANY DEPTH. That is what you
+# want for build output -- `dist/` must catch acme-web/dist, which is not at the
+# repo root -- and it is a trap for anything that could also name a SOURCE
+# directory. `lib/` is the one that bites: it silently swallows
+# acme-web/src/lib, and the branch then ships imports referring to files git has
+# never heard of. Anchor those (`/lib`), or do not add them.
 node_modules/
 dist/
 .vite/
