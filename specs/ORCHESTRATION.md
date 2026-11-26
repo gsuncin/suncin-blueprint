@@ -7,7 +7,7 @@ from this file yet; `specs/` contains only the template.
 > Keep this paragraph accurate. A stale status line at the top of this file is
 > the single most expensive lie in the repo — it is what makes a session
 > rebuild work that is already merged. If you are not sure, `git log
-> origin/main` and `releases/` are the truth.
+> origin/develop` and `releases/` are the truth.
 
 ## Agent roster
 
@@ -32,12 +32,17 @@ from this file yet; `specs/` contains only the template.
 3. **Human decisions are hard gates.** An agent that hits one stops and asks.
    It does not pick a default and note it — that is how a decision gets made by
    accident.
-4. **`security-agent` and `design-agent` review before merge, not after.** A
-   finding after the merge is an incident; before the merge it is a comment.
-   Which review a diff needs is the table in CLAUDE.md, so nobody has to
-   judge it.
+4. **`security-agent` and `design-agent` run on request, and before merge,
+   never after.** If the request did not ask for a review, the orchestrator asks
+   the user once, at the end of the task, naming the reviews the table in
+   CLAUDE.md recommends; the merge waits for the answer. A subagent never asks
+   and never launches one. A finding after the merge is an incident; before the
+   merge it is a comment.
 5. **TDD is mandatory and a green suite is the exit gate (C-8). Blocked is not
    done.**
+6. **Brief a subagent with its task section and the `C-n`/`D-n` that bind it,
+   never "read everything".** A prompt that sends an agent to read whole spec
+   files spends its context before it writes a line.
 
 ## An uncommitted worktree is the most reliable way to lose work
 

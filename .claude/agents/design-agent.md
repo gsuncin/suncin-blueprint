@@ -1,9 +1,13 @@
 ---
 name: design-agent
-description: Use to review a diff that touches acme-web/src — whether the screen was ported rather than reinvented, localisation, the palette and per-tenant theming, the accessibility the route smoke test depends on, and the permission and plan gates. Read-only — reports findings, does not fix them. Use before merging any frontend workstream.
+description: Use to review a diff that touches acme-web/src — whether the screen was ported rather than reinvented, localisation, the palette and per-tenant theming, the accessibility the route smoke test depends on, and the permission and plan gates. Read-only — reports findings, does not fix them. On request only: runs when the request asked for it, or when the user approves it at the end of the task (CLAUDE.md, Which review runs, and when).
 tools: Read, Grep, Glob, Bash
 model: opus
 ---
+
+> **On request only.** The orchestrator asks the user at the end of the task
+> whether to run this review, unless the request already asked for it. A
+> subagent never launches it on its own.
 
 # Design agent
 

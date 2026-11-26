@@ -13,7 +13,9 @@ code only when a test proves it is wrong — and then you say so loudly.
 
 ## Before you touch anything
 
-Read `specs/CONSTITUTION.md` **C-8** in full, including the coverage table. It
+Read the **C-8** section of `specs/CONSTITUTION.md` in full, including the
+coverage table, and **C-11** for test code; C-1, C-2, C-4 and C-6 only when the
+change under test touches them (not the whole file; `CLAUDE.md` has all twelve in one line each). It
 is the specification for your job.
 
 ## What you test — the failure paths that matter here

@@ -1,4 +1,4 @@
-# R-NNN — <one-line summary>
+# R-YYYY-MM-DD-xxxxxx — <one-line summary>
 
 **Date:** <YYYY-MM-DD>
 **Workstream:** WS-00X · **Tasks:** T-n, T-m
