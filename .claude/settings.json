@@ -38,6 +38,11 @@
         "hooks": [
           {
             "type": "command",
+            "statusMessage": "checking the hard rules",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/hooks/guard-hard-rules.sh"
+          },
+          {
+            "type": "command",
             "statusMessage": "checking the suite's working directory",
             "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/hooks/guard-bff-test-cwd.sh"
           },

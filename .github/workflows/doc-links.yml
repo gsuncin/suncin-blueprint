@@ -48,6 +48,9 @@ jobs:
       - name: gateway CSP report-only
         if: ${{ !cancelled() }}
         run: ./scripts/tests/gateway-csp.test.sh
+      - name: hard-rules hook
+        if: ${{ !cancelled() }}
+        run: ./scripts/tests/guard-hard-rules.test.sh
       - name: workflows skip drafts
         if: ${{ !cancelled() }}
         run: ./scripts/check-ci-skips-drafts.sh

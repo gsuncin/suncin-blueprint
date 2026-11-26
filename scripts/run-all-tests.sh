@@ -99,6 +99,7 @@ run "tested-tree gate (shell)" . ./scripts/tests/tested-tree.test.sh
 run "retag unchanged images (shell)" . ./scripts/tests/retag-unchanged.test.sh
 run "gateway rate limits (shell)" . ./scripts/tests/gateway-rate-limits.test.sh
 run "gateway CSP report-only (shell)" . ./scripts/tests/gateway-csp.test.sh
+run "hard-rules hook (shell)" . ./scripts/tests/guard-hard-rules.test.sh
 # A draft PR runs no suite and marking it ready runs them all; the release
 # merge waits for the checks so the push to main can skip (graav-app #504).
 run "workflows skip drafts" . ./scripts/check-ci-skips-drafts.sh
