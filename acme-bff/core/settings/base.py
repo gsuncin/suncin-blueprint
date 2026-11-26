@@ -115,6 +115,7 @@ REST_FRAMEWORK = {
         "auth_login": config("AUTH_LOGIN_THROTTLE_RATE", default="5/min"),
         "auth_refresh": config("AUTH_REFRESH_THROTTLE_RATE", default="30/min"),
         "webhook": config("WEBHOOK_THROTTLE_RATE", default="60/min"),
+        "csp_report": config("CSP_REPORT_THROTTLE_RATE", default="30/min"),
     },
     # The gateway is the only ingress, so REMOTE_ADDR is the gateway and the
     # real client is the last entry in X-Forwarded-For. One proxy, one hop.

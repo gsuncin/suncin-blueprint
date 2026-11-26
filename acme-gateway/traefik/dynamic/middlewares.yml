@@ -152,6 +152,18 @@ http:
             font-src 'self' data: https://fonts.gstatic.com; form-action 'self';
             frame-ancestors 'none'; img-src 'self' data: blob:;
             script-src 'self'; style-src 'self' 'unsafe-inline'
+          # The same policy, report-only, with a report-uri: the enforced header
+          # blocks silently, and a third-party script that changes shows up only
+          # as a feature that stopped working. Reports land in the BFF's `csp`
+          # log (core/csp_report.py), with no path past the first segment.
+          # scripts/tests/gateway-csp.test.sh holds the two policies equal.
+          # (Ported from gestapro-monorepo R-302.)
+          Content-Security-Policy-Report-Only: >-
+            default-src 'self'; base-uri 'self'; connect-src 'self';
+            font-src 'self' data: https://fonts.gstatic.com; form-action 'self';
+            frame-ancestors 'none'; img-src 'self' data: blob:;
+            script-src 'self'; style-src 'self' 'unsafe-inline';
+            report-uri /api/public/csp-report/
           # Traefik echoes its version otherwise.
           Server: ""
           X-Powered-By: ""
