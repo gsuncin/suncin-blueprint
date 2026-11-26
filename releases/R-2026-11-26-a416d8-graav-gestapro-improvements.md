@@ -121,4 +121,5 @@ re-provisioning the box, or by patching `/usr/local/bin/<project>-backup.sh` by 
 the rendered version.
 
 Reviews: none run. Infrastructure, gateway and a public endpoint are touched,
-so `security-agent` is recommended; asking the owner.
+so `security-agent` was recommended; the owner approved merging into `develop`
+without it on 2026-11-26.
