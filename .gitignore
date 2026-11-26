@@ -58,3 +58,6 @@ test-results/
 # The changelog hook writes this next to the file and moves it into place.
 # A failed run leaves it behind, where `git add -A` will pick it up.
 .changelog.md.tmp
+
+# scripts/worktree-bootstrap.sh writes this per worktree.
+.worktree.env
