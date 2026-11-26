@@ -39,6 +39,9 @@ jobs:
       - name: tested-tree selftest
         if: ${{ !cancelled() }}
         run: ./scripts/tests/tested-tree.test.sh
+      - name: retag-unchanged selftest
+        if: ${{ !cancelled() }}
+        run: ./scripts/tests/retag-unchanged.test.sh
       - name: workflows skip drafts
         if: ${{ !cancelled() }}
         run: ./scripts/check-ci-skips-drafts.sh

@@ -1,6 +1,7 @@
 name: build acme-bff
 
 on:
+  workflow_dispatch: {}
   push:
     branches: [main]
     tags: ["v*.*.*"]

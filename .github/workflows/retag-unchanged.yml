@@ -1,0 +1,134 @@
+name: retag unchanged images
+
+# A deploy needs all five images at one `sha-<7>` tag, and the builds are
+# path-filtered, so this gives every image whose paths did not change the new
+# commit's tag, on the manifest it already has. No rebuild, no tests to repeat,
+# seconds. Before it, a release that touched one image skipped its deploy until
+# somebody dispatched the other builds by hand (graav-app R-2026-10-30-d3df6f). All of the
+# reasoning is in .github/scripts/retag-unchanged.sh.
+#
+# No path filter, on purpose: the question is asked of every push to main, and
+# the script is what answers "nothing here", so a docs-only merge writes no tag
+# and deploys nothing.
+#
+# Not named docker-*.yml: check-deploy-contract.sh reads every docker-*.yml as an
+# image build with `images:` and `context:`, and this builds nothing. Its name IS
+# in deploy-prod.yml's workflow_run list, because it can be the last to finish.
+on:
+  push:
+    branches: [main]
+
+# Nothing more at workflow level: each job names what it writes, so the registry
+# token and the dispatch token never sit in the same job.
+permissions:
+  contents: read
+
+# Never cancelled mid-run, unlike the builds. Commit A changes web and its build
+# runs; a docs merge D lands; if D cancelled A's retag, D could not copy web
+# (sha-A is not published yet) and A would lack the images its retag was writing,
+# so neither commit could ever deploy, with every check green. Runs take seconds,
+# so a queue costs nothing. check-deploy-contract.sh section 6b asserts this.
+concurrency:
+  group: retag-unchanged-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  retag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      dispatch: ${{ steps.retag.outputs.dispatch }}
+
+    steps:
+      # Full history: the script walks main back to the newest tagged ancestor,
+      # and diffs that commit against this one.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # BEFORE is what GitHub compared this push against to decide which builds
+      # fire, so the script can tell a build it fired from nothing at all, and
+      # from a build an earlier push fired that never published (stranded). The
+      # stranded ones come back in DISPATCH_FILE, one workflow per line, and are
+      # handed to the next job as one space-separated output. The script stays
+      # alone on its `run:` line: check-deploy-contract.sh finds this workflow
+      # by that line.
+      - env:
+          OWNER: ${{ github.repository_owner }}
+          BEFORE: ${{ github.event.before }}
+          DISPATCH_FILE: ${{ runner.temp }}/dispatch
+        run: .github/scripts/retag-unchanged.sh
+
+      - id: retag
+        env:
+          DISPATCH_FILE: ${{ runner.temp }}/dispatch
+        run: echo "dispatch=$(tr '\n' ' ' < "$DISPATCH_FILE")" >> "$GITHUB_OUTPUT"
+
+  # A stranded image: an earlier push changed it, its build failed or was
+  # cancelled, and this push does not touch its paths, so no build will ever
+  # write its tag and production stops deploying for every release after it
+  # (2026-10-31 to 11-09: auth, until docker-auth.yml was dispatched by hand).
+  # Dispatching on main builds main's tip (this commit or a newer one), and deploy-prod.yml hears the
+  # completion (it accepts workflow_dispatch builds of main).
+  #
+  # Its own job so that actions: write sits beside nothing else, and only after
+  # the retag succeeded, because a deploy needs those tags too. A dispatch made
+  # with GITHUB_TOKEN does create a run: GitHub's documented exception to "events
+  # from GITHUB_TOKEN start no workflow". check-deploy-contract.sh section 6b
+  # asserts this permission, so it is not dropped as unused.
+  dispatch:
+    needs: retag
+    if: needs.retag.outputs.dispatch != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      # A build of that workflow already queued or running on main is left to
+      # finish: the builds cancel in progress, so a dispatch would kill it and
+      # leave a cancelled check. If it publishes, the next push retags from it;
+      # if it fails, the next push lands here again. Nothing stays stranded.
+      # stdin closed on every gh call, which would otherwise read it.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WORKFLOWS: ${{ needs.retag.outputs.dispatch }}
+        run: |
+          set -euo pipefail
+          for wf in $WORKFLOWS; do
+            # An exact list, not a glob: `gh workflow run` also accepts display
+            # names, and this token could dispatch deploy-prod.yml.
+            case "$wf" in
+              docker-auth.yml|docker-bff.yml|docker-svc.yml|docker-web.yml) ;;
+              *) echo "::error::refusing to dispatch '$wf', which is not an image build"; exit 1 ;;
+            esac
+            busy="$(gh run list --workflow "$wf" --branch main --limit 20 \
+                      --json status --jq '[.[] | select(.status != "completed")] | length' < /dev/null)"
+            if [ "$busy" != 0 ]; then
+              echo "::notice title=not dispatched::$wf already has a run on main in flight; leaving it to finish"
+              continue
+            fi
+            # A dispatched build that went red is a broken build, not a stranded
+            # one: dispatching it on every push would only spend minutes. A human
+            # fixes it; a run that never started (billing) is `failure` too, so
+            # the warning says how to clear it.
+            last="$(gh run list --workflow "$wf" --branch main --event workflow_dispatch --status completed --limit 1 \
+                      --json conclusion --jq '.[0].conclusion // ""' < /dev/null)"
+            if [ "$last" = failure ]; then
+              echo "::warning title=not dispatched::the last dispatched run of $wf on main failed; fix it, then run: gh workflow run $wf --ref main"
+              continue
+            fi
+            gh workflow run "$wf" --ref main < /dev/null
+            echo "dispatched $wf on main"
+          done

@@ -96,6 +96,7 @@ run "release note lookup (shell)" . ./scripts/tests/find-release-note.test.sh
 # What may skip a suite in front of a deploy: real git history and a fake gh,
 # no token, no network (graav-app R-2026-10-30-d3df6f).
 run "tested-tree gate (shell)" . ./scripts/tests/tested-tree.test.sh
+run "retag unchanged images (shell)" . ./scripts/tests/retag-unchanged.test.sh
 # A draft PR runs no suite and marking it ready runs them all; the release
 # merge waits for the checks so the push to main can skip (graav-app #504).
 run "workflows skip drafts" . ./scripts/check-ci-skips-drafts.sh
