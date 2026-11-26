@@ -17,10 +17,13 @@ ls -lh /var/backups/acme/postgres/
 
 ## The part that is not done for you
 
-**These backups do not leave the box.** A volume that fails takes the database
-and its backups together. Before this is a real backup strategy, ship the dumps
-somewhere else — object storage with a lifecycle rule is the usual answer, and
-`acme-backup.sh` is where to add the upload.
+**Unless `backup_upload_url` is set, these backups do not leave the box.** A
+volume that fails takes the database and its backups together. Set
+`backup_upload_url` on the module to a write-only, pre-authenticated object
+storage prefix (an OCI pre-authenticated request, or an S3 presigned prefix),
+ending in `/`, and each dump and its `.sha256` are PUT there after they are
+written. A failed upload fails `acme-backup.service`; put an alert on that unit.
+Give the bucket a lifecycle rule, since the box only prunes its own copies.
 
 **And a backup nobody has restored is a hope.** The checksum catches a
 truncated write; it says nothing about whether the dump is usable. Restore into

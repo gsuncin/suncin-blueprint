@@ -82,6 +82,12 @@ output "assertions" {
     # the dollar, the script would run with an empty path and write to /.
     shell_expansion_intact = strcontains(local.rendered, "$${BACKUP_DIR}")
 
+    # The other half of the same trap: templatefile only unescapes `$${`. A
+    # `$$(` or `$$?` is left as written, and bash reads `$$` as its PID, so
+    # `stamp="$$(date)"` names every dump `<pid>(date ...)`. Likewise compose
+    # unescapes `$$` once, so `$$$$HOSTNAME` reaches the shell as `$$HOSTNAME`.
+    no_doubled_shell_dollar = length(regexall("\\$\\$[(?]|\\$\\$\\$\\$", local.rendered)) == 0
+
     every_service_declared = alltrue([
       for service in ["traefik", "auth", "web", "bff", "worker", "svc-example", "postgres", "rabbitmq"] :
       strcontains(local.rendered, "${service}:")
