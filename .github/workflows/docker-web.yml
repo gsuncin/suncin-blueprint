@@ -9,31 +9,98 @@ on:
       - ".github/workflows/docker-web.yml"
       - ".github/workflows/web-tests.yml"
   pull_request:
+    # ready_for_review: a draft runs nothing, so marking it ready is what
+    # starts these jobs. scripts/check-ci-skips-drafts.sh holds the rule.
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
     paths:
       - "acme-web/**"
       - ".github/workflows/docker-web.yml"
       - ".github/workflows/web-tests.yml"
 
+# `packages: write` sits on build-and-push alone: the other jobs run a PR's code
+# and only ever need to read.
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: docker-web-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # The gate. deploy-prod.yml fires on this workflow completing, so a red suite
-  # here is what stops a bad image reaching production — there is no separate
-  # check to forget to wire up.
+  # Has this exact tree already passed? A release PR runs the suite on the merge
+  # of develop into main, and the push to main produces that same tree, so
+  # running it again is billed minutes to learn what is already known. This
+  # answers skip=true only on an exact tree match; every doubtful case, a failed
+  # API call included, answers skip=false. See .github/scripts/tested-tree.sh.
+  #
+  # `statuses: read` is what lets it read the status: a job that declares any
+  # permission starts from none, so without it every lookup is a 403 and the
+  # suite runs on every push with nothing going red. It runs on every event
+  # because `tests` needs it, and a skipped `needs` would skip `tests` too.
+  gate:
+    # No run on a draft PR; the jobs that need this one are skipped with it.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: read
+    outputs:
+      skip: ${{ steps.lookup.outputs.skip }}
+    steps:
+      # Depth 2 brings both parents of a merge commit, and the second parent is
+      # the PR head the status sits on.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+
+      - id: lookup
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/tested-tree.sh lookup web
+
+  # What stops a bad image. deploy-prod.yml fires on this workflow completing,
+  # so a red suite here is what keeps a bad image from production.
   tests:
+    needs: gate
+    if: needs.gate.outputs.skip != 'true'
     uses: ./.github/workflows/web-tests.yml
 
-  build-and-push:
+  # On the PR, after the suite passed: this tree is tested. The one job with
+  # `statuses: write`. If it fails the push to main runs the suite again and
+  # that is the whole cost, so it is not allowed to turn the run red.
+  record-tested-tree:
     needs: tests
+    if: ${{ github.event_name == 'pull_request' && needs.tests.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: .github/scripts/tested-tree.sh record web
+
+  # `needs` on a skipped job skips its dependents by default, so `needs: tests`
+  # alone would mean no image and no deploy on every push the gate skipped. So
+  # this states the two ways to publish and nothing else: the suite passed here,
+  # or the gate skipped it on an exact tree.
+  # Never on a pull request: `isolation` already runs `docker compose up --build`
+  # from this context on every release PR (graav-app R-2026-10-30-d3df6f).
+  build-and-push:
+    needs: [gate, tests]
+    if: ${{ !cancelled() && needs.gate.result == 'success' && github.event_name != 'pull_request' && (needs.tests.result == 'success' || (needs.tests.result == 'skipped' && needs.gate.outputs.skip == 'true')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - uses: actions/checkout@v5
@@ -42,7 +109,6 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
-        if: github.event_name == 'push'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -58,15 +124,16 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
+            # `latest` means "whatever main has", pinned to that branch by name:
+            # {{is_default_branch}} froze `latest` in graav-app when the default
+            # branch was not main.
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - uses: docker/build-push-action@v6
         with:
           context: ./acme-web
           platforms: linux/amd64,linux/arm64
-          # PRs build but never publish: the build is the check, and a PR that
-          # can push can overwrite a tag production is running.
-          push: ${{ github.event_name == 'push' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

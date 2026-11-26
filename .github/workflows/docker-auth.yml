@@ -9,15 +9,19 @@ on:
       - ".github/workflows/docker-auth.yml"
       - ".github/workflows/auth-tests.yml"
   pull_request:
+    # ready_for_review: a draft runs nothing, so marking it ready is what
+    # starts these jobs. scripts/check-ci-skips-drafts.sh holds the rule.
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
     paths:
       - "acme-gateway/auth/**"
       - ".github/workflows/docker-auth.yml"
       - ".github/workflows/auth-tests.yml"
 
+# `packages: write` sits on build-and-push alone: the other jobs run a PR's code
+# and only ever need to read.
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: docker-auth-${{ github.ref }}
@@ -28,12 +32,21 @@ jobs:
   # here is what stops a bad image reaching production — there is no separate
   # check to forget to wire up.
   tests:
+    # No run on a draft PR; build-and-push is skipped with it.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     uses: ./.github/workflows/auth-tests.yml
 
+  # Never on a pull request: `isolation` already runs `docker compose up --build`
+  # from the same contexts on every release PR, so a PR build repeated it and
+  # threw the result away (graav-app R-2026-10-30-d3df6f).
   build-and-push:
     needs: tests
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - uses: actions/checkout@v5
@@ -42,7 +55,6 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
-        if: github.event_name == 'push'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -58,15 +70,16 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
+            # `latest` means "whatever main has", pinned to that branch by name:
+            # {{is_default_branch}} froze `latest` in graav-app when the default
+            # branch was not main.
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - uses: docker/build-push-action@v6
         with:
           context: ./acme-gateway/auth
           platforms: linux/amd64,linux/arm64
-          # PRs build but never publish: the build is the check, and a PR that
-          # can push can overwrite a tag production is running.
-          push: ${{ github.event_name == 'push' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

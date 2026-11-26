@@ -2,25 +2,29 @@ name: review gate
 
 # Review comments are a merge gate (specs/RELEASES.md).
 #
-# HONEST LIMITATION: this is a signal, not an enforced block. "Require
-# conversation resolution before merging" is a branch-protection setting, and
-# branch protection needs a paid plan on a private repo. Also, resolving a
-# thread fires no webhook, so this does not re-run by itself — push a commit or
-# re-run it by hand after clearing threads.
+# THE GATE IS `scripts/pr-review-gate.sh <PR>`, RUN BY HAND BEFORE A MERGE. This
+# workflow is that same script on a runner, for whoever has no local checkout.
+#
+# WHY DISPATCH ONLY (graav-app R-2026-10-30-d3df6f). It ran on open, ready and
+# every review, and billed 160 minutes a month for a job that takes six
+# seconds and blocks nothing: "require conversation resolution" is a
+# branch-protection setting, branch protection needs GitHub Pro on a private
+# repository, and the API answers 403 there. A check that cannot block a
+# merge and goes stale on the next push is a bill, not a gate.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  pull_request_review:
-    types: [submitted, dismissed]
-  pull_request_review_comment:
-    types: [created, deleted]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to check"
+        required: true
+        type: string
 
 permissions:
   contents: read
   pull-requests: read
 
 concurrency:
-  group: review-gate-${{ github.event.pull_request.number }}
+  group: review-gate-${{ inputs.pr }}
   cancel-in-progress: true
 
 jobs:
@@ -31,6 +35,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The number arrives through env:, never pasted into the script — a
+      # dispatch input is free text (see release-notes.yml for what a ${{ }}
+      # inside `run:` has already done here once).
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./scripts/pr-review-gate.sh "${{ github.event.pull_request.number }}"
+          PR: ${{ inputs.pr }}
+        run: ./scripts/pr-review-gate.sh "$PR"

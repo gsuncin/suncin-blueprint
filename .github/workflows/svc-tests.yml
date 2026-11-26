@@ -11,7 +11,13 @@ name: microservice tests
 
 on:
   workflow_dispatch: {}
-  workflow_call: {}
+  workflow_call:
+    # docker-svc.yml builds one image per entry, so the list it builds is the
+    # list that was just tested rather than a second derivation of it.
+    outputs:
+      services:
+        description: "JSON array of the acme-svc-* directories this run tested"
+        value: ${{ jobs.discover.outputs.services }}
 
 permissions:
   contents: read
