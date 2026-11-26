@@ -13,6 +13,8 @@ name: doc links
 # change that breaks them.
 on:
   pull_request:
+    # ready_for_review: a draft runs nothing (scripts/check-ci-skips-drafts.sh).
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
@@ -25,8 +27,33 @@ concurrency:
 
 jobs:
   links:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
       - run: ./scripts/check-doc-links.sh
+      # The CI-machinery selftests ride on this job, not a job of their own: a
+      # job is billed in whole minutes and each of these takes seconds.
+      # `!cancelled()` so one red step does not hide the next.
+      - name: tested-tree selftest
+        if: ${{ !cancelled() }}
+        run: ./scripts/tests/tested-tree.test.sh
+      - name: retag-unchanged selftest
+        if: ${{ !cancelled() }}
+        run: ./scripts/tests/retag-unchanged.test.sh
+      - name: gateway rate limits
+        if: ${{ !cancelled() }}
+        run: ./scripts/tests/gateway-rate-limits.test.sh
+      - name: gateway CSP report-only
+        if: ${{ !cancelled() }}
+        run: ./scripts/tests/gateway-csp.test.sh
+      - name: hard-rules hook
+        if: ${{ !cancelled() }}
+        run: ./scripts/tests/guard-hard-rules.test.sh
+      - name: workflows skip drafts
+        if: ${{ !cancelled() }}
+        run: ./scripts/check-ci-skips-drafts.sh
+      - name: merge-release selftest
+        if: ${{ !cancelled() }}
+        run: ./scripts/tests/merge-release.test.sh

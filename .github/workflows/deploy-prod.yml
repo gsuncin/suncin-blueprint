@@ -1,5 +1,22 @@
 name: deploy production
 
+# A deploy pins ALL release services to ONE tag, so it is only possible once
+# every image exists at that tag. The builds are path-filtered: a merge that
+# touches only acme-bff builds only bff. `retag unchanged images` gives the
+# others that commit's tag without rebuilding them. So this listens to every
+# build and to the retag, and each run first asks ghcr whether the whole set is
+# there. Until it is, the run ends green as "skipped", with a notice naming what
+# is missing, and never connects to the box; whichever finishes last, a build or
+# the retag, is the one that deploys. Ported from graav-app R-2026-10-16-4ed9c2:
+# before it, this listened to bff and web only, deployed as soon as either
+# finished, and failed at `pull` on whatever had not been built.
+#
+# A docs-only merge publishes nothing, so its preflight finds every image
+# missing and skips. That is the correct outcome, not a stuck deploy.
+#
+# The list below is checked by .github/scripts/check-deploy-contract.sh
+# (section 6) against the `name:` of every .github/workflows/docker-*.yml and of
+# retag-unchanged.yml. It is one line on purpose: that check parses it.
 on:
   workflow_dispatch:
     inputs:
@@ -8,30 +25,211 @@ on:
         required: true
         type: string
   workflow_run:
-    workflows: ["build acme-bff", "build acme-web"]
+    workflows: ["build acme-bff", "build acme-web", "build microservice images", "build acme-gateway-auth", "retag unchanged images"]
     types: [completed]
     branches: [main]
 
 permissions:
   contents: read
+  # REGISTRY_TOKEN below is this workflow's own ephemeral GITHUB_TOKEN, scoped
+  # to exactly what's declared here — not the build workflow's. Without this,
+  # `docker login` succeeds (it doesn't check scope) and every pull then fails
+  # with "denied". The preflight's manifest checks use the same scope.
+  packages: read
 
-# Never cancel a deploy mid-flight. Two builds finishing close together should
-# queue, not race — a cancelled deploy leaves the box half-updated.
-concurrency:
-  group: deploy-prod
-  cancel-in-progress: false
+# Concurrency is on the `deploy` job, not here — see the comment there.
 
 jobs:
-  deploy:
+  # No secrets, no tailnet, no box. Decides the tag and whether every image it
+  # names has been published.
+  #
+  # WHO MAY TRIGGER A DEPLOY is written into the workflow, not left to repository
+  # settings. A workflow_run fires for a build started by ANY event, including
+  # a pull_request whose head branch is called `main` — from a fork, the day
+  # forking is enabled — and this workflow then checks out that build's
+  # head_sha with production secrets in reach. Today only "private repo, no
+  # forks, no fork-PR workflows" stops that. So: a dispatch must be on main; a
+  # build must have succeeded, been started by a push or a dispatch, in this
+  # repository, on main. The same condition is repeated on `deploy`, which
+  # must not trust `ready` alone, re-checked in the tag step, and backed by an
+  # ancestry check after checkout. check-deploy-contract.sh section 6 asserts
+  # all of it.
+  preflight:
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.event == 'push' ||
+        github.event.workflow_run.event == 'workflow_dispatch') &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      image_tag: ${{ steps.tag.outputs.image_tag }}
+      ref: ${{ steps.tag.outputs.ref }}
+      ready: ${{ steps.published.outputs.ready }}
+    steps:
+      # A build-triggered run deploys the commit THAT BUILD built:
+      # workflow_run.head_sha. `github.sha` in a workflow_run event is the tip
+      # of the repository's default branch, which can already be past the
+      # commit this build built (or be another branch entirely). The short form
+      # matches what the builds push:
+      # docker/metadata-action `type=sha,format=short,prefix=sha-` is 7 hex.
+      # (The previous expression was `sha-<github.sha>`, full length and from
+      # the wrong branch, so no build-triggered deploy could have found its
+      # images.)
+      - id: tag
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          DISPATCH_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # The job condition again, in a second language. An `if:` is easy to
+          # loosen in a hurry; this fails red where the condition would only skip.
+          if [ "$EVENT_NAME" = workflow_run ]; then
+            case "$RUN_EVENT" in push|workflow_dispatch) ;; *)
+              echo "::error::refusing a deploy from a build triggered by '$RUN_EVENT'"; exit 1 ;;
+            esac
+            [ "$HEAD_REPO" = "$REPO" ] || { echo "::error::refusing a build of '$HEAD_REPO'"; exit 1; }
+            [ "$HEAD_BRANCH" = main ] || { echo "::error::refusing a build of branch '$HEAD_BRANCH'"; exit 1; }
+          fi
+          if [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"
+            ref="$DISPATCH_SHA"
+          else
+            tag="sha-${HEAD_SHA:0:7}"
+            ref="$HEAD_SHA"
+          fi
+          # The same grammar deploy-remote.sh enforces; failing here costs no
+          # tailnet join.
+          if ! [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || [ "$tag" = latest ]; then
+            echo "::error::'$tag' is not an immutable image tag"
+            exit 1
+          fi
+          echo "image_tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "deploying $tag from $ref"
+
+      # Full history, so the ancestry check below can see main.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.tag.outputs.ref }}
+          fetch-depth: 0
+
+      # head_sha must be a commit on main — reviewed and merged — not merely a
+      # build that claims the branch name. Red, not a skip: if this ever fails,
+      # something is trying to deploy code main does not have.
+      - name: the commit is on main
+        env:
+          REF: ${{ steps.tag.outputs.ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$REF" origin/main; then
+            echo "::error::$REF is not on main; refusing to deploy it"
+            exit 1
+          fi
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The list comes from release-images.sh — the parse the contract check
+      # uses to compare what CI publishes with what the box pulls — so it
+      # cannot fall behind a new image. ghcr namespaces are lowercase, and
+      # the builds publish under the lowercased owner.
+      - id: published
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          owner="${OWNER,,}"
+          missing=""
+          # Assigned first, then checked: `for x in $(cmd)` throws away cmd's
+          # exit status, so a failing release-images.sh used to read as "no
+          # images, none missing, ready". check-deploy-contract.sh section 6
+          # forbids that shape anywhere in this file.
+          repos="$(.github/scripts/release-images.sh | awk '{ print $2 }' | sort -u)"
+          [ -n "$repos" ] || { echo "::error::no release images"; exit 1; }
+          for repo in $repos; do
+            ref="ghcr.io/${owner}/${repo}:${IMAGE_TAG}"
+            if out="$(docker manifest inspect "$ref" 2>&1 > /dev/null)"; then
+              echo "present: $ref"
+            elif printf '%s' "$out" | grep -qiE 'manifest unknown|no such manifest|not found'; then
+              echo "missing: $ref"
+              missing="${missing} ${ref}"
+            else
+              # Anything else — denied, rate-limited, unreachable — is not
+              # evidence of absence. Red, rather than a quiet skip that would
+              # look exactly like "a build has not finished yet".
+              echo "::error::could not ask ghcr about ${ref}: ${out}"
+              exit 1
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::notice title=deploy skipped::${IMAGE_TAG} is not fully published yet; missing:${missing}. Whichever finishes last, a build or 'retag unchanged images', deploys. Every image missing on a commit no build touched is a docs-only merge, which deploys nothing on purpose. If a build failed or an image stays missing, fix it or dispatch that build on main."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    needs: preflight
+    if: >-
+      needs.preflight.outputs.ready == 'true' &&
+      (
+        (github.event_name == 'workflow_dispatch' &&
+         github.ref == 'refs/heads/main') ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         (github.event.workflow_run.event == 'push' ||
+          github.event.workflow_run.event == 'workflow_dispatch') &&
+         github.event.workflow_run.head_repository.full_name == github.repository &&
+         github.event.workflow_run.head_branch == 'main')
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
 
+    # Serialised HERE, on the only job that touches the box, and never
+    # cancelled in flight: a cancelled deploy leaves the box half-updated, and
+    # two different tags must not deploy at once, so the group is not per-sha.
+    #
+    # Not on the workflow. There, every preflight queued in one group, and
+    # GitHub cancels an older PENDING run when a newer one arrives — so commit
+    # B's run, about to skip, could cancel commit A's run that had everything
+    # published, and production stayed behind with every check green. Now
+    # preflights run freely, and only runs that found the whole set compete.
+    # GitHub still replaces an older pending deploy with a newer one; that one
+    # has passed the same preflight, so the box ends on the later arrival.
+    #
+    # This group only queues. What stops two triggers for the same commit
+    # deploying twice is the check it makes possible: the second deploy starts
+    # after the first finished, and deploy-remote.sh, given
+    # SKIP_IF_ALREADY_DEPLOYED, reads the box's own deploy-status and stops if
+    # that tag already succeeded. The box is the authoritative record of what
+    # it runs; the run history (where skipped runs are green too) is not.
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
+
     steps:
+      # The commit being deployed, not the default branch: deploy-remote.sh is
+      # streamed from this checkout, and the branch tip can be ahead of it.
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
 
       # The runner joins the tailnet, then SSHes to a 100.x address. That is
       # what lets the security group open 80/443 and nothing else — no bastion,
@@ -54,9 +252,19 @@ jobs:
       # pre-installed on the server, so the box cannot drift from the repo.
       - name: deploy
         env:
-          IMAGE_TAG: ${{ inputs.image_tag || format('sha-{0}', github.sha) }}
+          IMAGE_TAG: ${{ needs.preflight.outputs.image_tag }}
+          # Build-triggered runs only: see the concurrency block. A dispatch is
+          # a deliberate redeploy and is never skipped.
+          SKIP_IF_ALREADY_DEPLOYED: ${{ github.event_name == 'workflow_run' && '1' || '0' }}
           REGISTRY_USERNAME: ${{ github.actor }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Names /opt/<project> and every container. It has to equal
+          # `project` in acme-tf/envs/*: the compose template names containers
+          # `<project>-<service>` and the deploy script looks them up that way
+          # to record the digests it would roll back to. Changing one alone
+          # writes an empty rollback-images and loses the only safety net in
+          # this path, without saying so.
+          # .github/scripts/check-deploy-contract.sh asserts they agree.
           PROJECT: acme
         run: |
           ssh -i ~/.ssh/deploy_key \
@@ -65,13 +273,14 @@ jobs:
                 REGISTRY_USERNAME="$REGISTRY_USERNAME" \
                 REGISTRY_TOKEN="$REGISTRY_TOKEN" \
                 PROJECT="$PROJECT" \
+                SKIP_IF_ALREADY_DEPLOYED="$SKIP_IF_ALREADY_DEPLOYED" \
                 bash -s < .github/scripts/deploy-remote.sh
 
       # The deploy script checks health from inside the box. This checks it
       # from outside, through DNS, TLS and the gateway — the path a user takes.
       - name: smoke test the public URL
         run: |
-          for attempt in $(seq 1 10); do
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
             code="$(curl -sS -o /dev/null -w '%{http_code}' \
                     "https://${{ secrets.PROD_DOMAIN_APP }}/api/health" || echo 000)"
             echo "attempt $attempt: $code"

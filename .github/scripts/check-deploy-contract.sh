@@ -377,6 +377,59 @@ else
     fi
 fi
 
+# --- 6. deploy-prod.yml listens to every build, and fails closed -------------
+# A deploy pins every release image to one tag, and its preflight skips until
+# all of them exist. A build it does not listen to is a release that waits for
+# the next unrelated build to deploy (graav-app's 2026-10-12 incident).
+echo
+echo "6. deploy-prod.yml listens to every build and to the retag"
+
+listened="$(sed -nE 's/^[[:space:]]*workflows: \[(.*)\][[:space:]]*$/\1/p' .github/workflows/deploy-prod.yml \
+            | tr ',' '\n' | sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//' | awk 'NF' | sort -u)"
+builders="$(for wf in .github/workflows/docker-*.yml .github/workflows/retag-unchanged.yml; do
+                [ -f "$wf" ] && sed -nE 's/^name:[[:space:]]*(.+)$/\1/p' "$wf" | head -1
+            done | sort -u)"
+if [ -z "$listened" ] || [ -z "$builders" ]; then
+    fault "could not read deploy-prod.yml's workflow_run list or the build names"
+elif [ "$listened" = "$builders" ]; then
+    pass "workflow_run lists: $(printf '%s' "$listened" | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+else
+    fault "deploy-prod.yml's workflow_run list and the build workflows disagree:
+$(diff <(printf '%s\n' "$listened") <(printf '%s\n' "$builders") || true)"
+fi
+
+# The preflight's tag is the 7-character sha of the commit the build built, the
+# same form docker/metadata-action pushes; never github.sha, which in a
+# workflow_run event is the default branch's tip.
+if grep -qF 'tag="sha-${HEAD_SHA:0:7}"' .github/workflows/deploy-prod.yml \
+   && ! grep -qF "format('sha-{0}', github.sha)" .github/workflows/deploy-prod.yml; then
+    pass "the tag is sha-<7> of workflow_run.head_sha"
+else
+    fault "deploy-prod.yml does not derive the tag from workflow_run.head_sha's first 7 characters"
+fi
+
+# `for x in $(cmd)` discards cmd's exit status, so a failing release-images.sh
+# would read as "no images, none missing, ready".
+if grep -qE 'for [a-z_]+ in \$\(\.github/scripts/release-images\.sh' .github/workflows/deploy-prod.yml; then
+    fault "deploy-prod.yml loops over \$(release-images.sh) directly, which hides its failure"
+else
+    pass "release-images.sh's exit status is checked before the loop"
+fi
+
+# Each docker-*.yml publishes from build-and-push alone, and never on a PR.
+publish_faults=0
+for wf in .github/workflows/docker-*.yml; do
+    if grep -qE '^  packages: write' "$wf"; then
+        fault "$wf grants packages: write to every job; it belongs on build-and-push alone"
+        publish_faults=$((publish_faults + 1))
+    fi
+    if ! sed -n '/^  build-and-push:/,/^    steps:/p' "$wf" | grep -q "github.event_name != 'pull_request'"; then
+        fault "$wf's build-and-push can run on a pull request"
+        publish_faults=$((publish_faults + 1))
+    fi
+done
+[ "$publish_faults" -eq 0 ] && pass "every build-and-push holds packages: write alone and never runs on a pull request"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "PASS — the deploy path covers the whole stack."

@@ -93,6 +93,17 @@ run "terraform render tests"  . terraform -chdir=acme-tf/tests/render test
 # workflow and the notes out of releases/, so a wrong pattern or a misnamed note
 # is red here rather than a release that silently never publishes.
 run "release note lookup (shell)" . ./scripts/tests/find-release-note.test.sh
+# What may skip a suite in front of a deploy: real git history and a fake gh,
+# no token, no network (graav-app R-2026-10-30-d3df6f).
+run "tested-tree gate (shell)" . ./scripts/tests/tested-tree.test.sh
+run "retag unchanged images (shell)" . ./scripts/tests/retag-unchanged.test.sh
+run "gateway rate limits (shell)" . ./scripts/tests/gateway-rate-limits.test.sh
+run "gateway CSP report-only (shell)" . ./scripts/tests/gateway-csp.test.sh
+run "hard-rules hook (shell)" . ./scripts/tests/guard-hard-rules.test.sh
+# A draft PR runs no suite and marking it ready runs them all; the release
+# merge waits for the checks so the push to main can skip (graav-app #504).
+run "workflows skip drafts" . ./scripts/check-ci-skips-drafts.sh
+run "merge-release (shell)" . ./scripts/tests/merge-release.test.sh
 
 # Every relative link in the docs resolves. The PostToolUse hook runs this on
 # one file at edit time; this is the sweep.

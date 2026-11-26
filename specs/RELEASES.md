@@ -2,11 +2,11 @@
 
 Three layers. **They compose — do not duplicate them.**
 
-| | `.changelog.md` | Release note (`R-NNN`) | Production release |
+| | `.changelog.md` | Release note (`R-YYYY-MM-DD-xxxxxx`) | Production release |
 |---|---|---|---|
 | Written by | `scripts/precommit-changelog-docs.sh`, automatically | Whoever merges | Repo owner, at deploy |
-| Trigger | Every commit | Every merge to `main` | A deliberate deploy |
-| Identity | Date heading | `R-NNN`, sequential | `vMAJOR.MINOR.PATCH` tag |
+| Trigger | Every commit | Every merged PR | A deliberate deploy |
+| Identity | Date heading | `R-YYYY-MM-DD-xxxxxx` (see below) | `vMAJOR.MINOR.PATCH` tag |
 | Content | Mechanical: scope + file list, stamped `Review required` | What it means, and the test evidence | Checklist, rollback plan |
 
 The pre-commit hook records *which paths changed*. The release note says *what
@@ -14,7 +14,8 @@ the change means*. The `Review required` stamp is the seam between them.
 
 ## One source, two surfaces
 
-`releases/R-NNN-<slug>.md` is written in the repo. Pushing the tag `R-NNN` runs
+`releases/R-YYYY-MM-DD-xxxxxx-<slug>.md` is written in the repo. Pushing the tag
+of the same name runs
 `.github/workflows/release-notes.yml`, which finds that file, uses its H1 as
 the release title and its body as the body, and creates — or updates — the
 GitHub Release.
@@ -65,7 +66,7 @@ git history already answers better.
 ## Template
 
 ```markdown
-# R-NNN — <one-line summary>
+# R-YYYY-MM-DD-xxxxxx — <one-line summary>
 
 **Date:** <YYYY-MM-DD>
 **Workstream:** WS-00X · **Tasks:** T-n, T-m
@@ -154,9 +155,11 @@ Every one of these, in this order. None is optional, and none is a followup:
 
 1. **A green suite, output pasted.** A sentence claiming success is not
    evidence (C-8).
-2. **The reviews the diff calls for** — the table in CLAUDE.md decides which,
-   so it is not a judgement call. Before the merge: after it, a finding is an
-   incident.
+2. **The reviews that were asked for or approved.** Unless the request asked
+   for a review at the start, the orchestrator asks the user at the end of the
+   task, recommending what the table in CLAUDE.md names for the diff. The note
+   records which reviews ran, or "declined by the user on <date>". Before the
+   merge: after it, a finding is an incident.
 3. **Every review comment cleared**, scored and answered — the section below.
 4. **A release note in `releases/`**, named for the identifier above.
 5. **The spec moved from `specs/` to `history/`**, in the SAME PR as the note.
@@ -166,6 +169,22 @@ Every one of these, in this order. None is optional, and none is a followup:
 
 **The merge itself is the one step a person confirms.** Everything above can be
 checked mechanically; whether this should ship now cannot.
+
+## How far the review goes
+
+Ported from gestapro-monorepo R-409, where one integration went through five
+rounds of bot review in a day, each with a new edge case, and two releases of
+code switched off in production waited on it.
+
+1. **The release PR (`develop` → `main`) only promotes.** A bot finding on a
+   path that is switched off in production (behind a flag or an entitlement)
+   becomes an Issue against `develop` and does not hold the release. A finding
+   on a path that is live holds it, and is fixed first, in `develop`.
+2. **A feature PR gets at most two rounds of bot review:** the first push and
+   one push of fixes. After that, a finding on a switched-off path becomes an
+   Issue, and that Issue is a condition for switching the path on.
+3. **The three reasons to stop still hold:** a Constitution violation, a
+   decision only the owner can make, and an unknown.
 
 ## Before you merge: review comments are a gate
 

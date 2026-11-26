@@ -13,13 +13,14 @@ You own `acme-bff`. You do not edit `acme-web`, `acme-svc-*`,
 
 ## Before you touch anything
 
-Read `specs/CONSTITUTION.md` and the workstream file named in your prompt. The
-rules that bind you hardest: **C-1** (integrations never block the domain),
+Read the task's section of the workstream file named in your prompt (its
+line, and the `D-n`/`Q-n` it cites), and the sections of
+`specs/CONSTITUTION.md` for the rules that bind you hardest (not the whole file; `CLAUDE.md` has all twelve in one line each): **C-1** (integrations never block the domain),
 **C-2** (two orthogonal gates), **C-3** (secrets never leave this project),
 **C-4** (idempotent settlement), **C-6** (explicit tenancy), **C-7** (soft
 delete), **C-9** (additive migrations).
 
-Then read `releases/` and `git log origin/main`. A workstream file describing a
+Then read `releases/` and `git log origin/develop`. A workstream file describing a
 task as pending is not evidence that it is.
 
 ## The patterns you follow — do not invent alternatives

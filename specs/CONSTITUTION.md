@@ -1,8 +1,12 @@
 # Engineering Constitution
 
-Non-negotiable rules. Every agent working in this monorepo loads this file
-before touching code. A task that cannot be completed without breaking one of
-these rules is a task that needs re-specifying, not a rule to bend.
+Non-negotiable rules. Every agent working in this monorepo is bound by all
+of them, and reads the section of each rule its task touches: `CLAUDE.md`
+carries all twelve in one line each, and every agent file names the sections it
+reads. Reading the whole file up front costs every prompt and every subagent
+for rules the task never reaches. A task that cannot be completed without
+breaking one of these rules is a task that needs re-specifying, not a rule to
+bend.
 
 ## C-1 — Integrations never block the domain
 

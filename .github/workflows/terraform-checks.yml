@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths: ["acme-tf/**", "acme-gateway/traefik/**", ".github/workflows/terraform-checks.yml"]
   pull_request:
+    # ready_for_review: a draft runs nothing (scripts/check-ci-skips-drafts.sh).
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
     paths: ["acme-tf/**", "acme-gateway/traefik/**", ".github/workflows/terraform-checks.yml"]
 
@@ -17,6 +19,7 @@ concurrency:
 
 jobs:
   checks:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

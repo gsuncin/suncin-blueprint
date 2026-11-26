@@ -142,6 +142,7 @@ ${traefik_routers}
     content: |
       BACKUP_DIR=/var/backups/${project}/postgres
       RETENTION_DAYS=${backup_retention_days}
+      UPLOAD_URL=${backup_upload_url}
       POSTGRES_USER=${postgres_user}
       POSTGRES_DB=${postgres_db}
       PROJECT=${project}
@@ -153,13 +154,15 @@ ${traefik_routers}
       # Nightly pg_dump with a checksum, pruned by age.
       #
       # $$$${VAR} below is a shell expansion that must survive templatefile:
-      # a single $$ would be consumed by Terraform. Values Terraform injects use
-      # a single $$ and are already substituted by the time this runs.
+      # a single $$ would be consumed by Terraform. Only `$${` is an escape:
+      # `$(`, `$?` and `$name` pass through templatefile as written, so they
+      # take ONE dollar here (two before a parenthesis read as the PID). The render
+      # test no_doubled_shell_dollar holds this.
       set -Eeuo pipefail
       source /etc/default/${project}-backup
 
       mkdir -p "$${BACKUP_DIR}"
-      stamp="$$(date -u +%Y%m%dT%H%M%SZ)"
+      stamp="$(date -u +%Y%m%dT%H%M%SZ)"
       target="$${BACKUP_DIR}/$${POSTGRES_DB}-$${stamp}.dump"
 
       docker exec "$${PROJECT}-postgres" \
@@ -168,6 +171,17 @@ ${traefik_routers}
       # A backup nobody verified is a hope. The checksum is the cheapest form
       # of verification that catches a truncated write.
       sha256sum "$${target}" > "$${target}.sha256"
+
+      # Off the box, when a write-only URL is configured. The URL is a
+      # credential: it is never echoed, and curl is told not to print it.
+      # A failed upload fails the unit, which is what an alert watches.
+      if [ -n "$${UPLOAD_URL:-}" ]; then
+          for file in "$${target}" "$${target}.sha256"; do
+              curl -fsS --retry 3 -o /dev/null -T "$${file}" "$${UPLOAD_URL}$(basename "$${file}")" \
+                  || { echo "off-box upload FAILED for $(basename "$${file}")" >&2; exit 1; }
+          done
+          echo "uploaded off the box: $(basename "$${target}")"
+      fi
 
       find "$${BACKUP_DIR}" -name '*.dump*' -mtime "+$${RETENTION_DAYS}" -delete
       echo "backup written: $${target}"
@@ -261,9 +275,9 @@ ${traefik_routers}
       log=/var/log/${project}-first-boot.log
       # Dual sink: the file survives a reboot, the console shows it in the
       # provider's serial output when SSH is not up yet.
-      exec > >(tee -a "$$log" | logger -t ${project}-first-boot -s 2>/dev/console) 2>&1
-      trap 'rc=$$?; echo "$$(date -Is) first boot FAILED rc=$$rc line=$$LINENO" \
-            | tee /opt/${project}/deploy-status; exit $$rc' ERR
+      exec > >(tee -a "$log" | logger -t ${project}-first-boot -s 2>/dev/console) 2>&1
+      trap 'rc=$?; echo "$(date -Is) first boot FAILED rc=$rc line=$LINENO" \
+            | tee /opt/${project}/deploy-status; exit $rc' ERR
 
       cd /opt/${project}
 
@@ -273,7 +287,7 @@ ${traefik_routers}
       docker compose pull
 
       docker compose up -d postgres rabbitmq
-      for i in $$(seq 1 60); do
+      for i in $(seq 1 60); do
           docker exec ${project}-postgres pg_isready -q && break
           sleep 2
       done
@@ -285,7 +299,7 @@ ${traefik_routers}
 
       systemctl enable --now ${project}.service
 
-      echo "$$(date -Is) first boot succeeded" | tee /opt/${project}/deploy-status
+      echo "$(date -Is) first boot succeeded" | tee /opt/${project}/deploy-status
 
 runcmd:
   # Docker from the official repository: the distribution package lags, and

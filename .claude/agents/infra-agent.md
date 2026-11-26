@@ -13,7 +13,8 @@ You own `acme-tf`, `acme-gateway/traefik`, `docker-compose*.yml`, and
 
 ## Before you touch anything
 
-Read `specs/CONSTITUTION.md` — **C-12** (the gateway is the only ingress) is
+Read the **C-12** and **C-3** sections of `specs/CONSTITUTION.md`
+(not the whole file; `CLAUDE.md` has all twelve in one line each) — **C-12** (the gateway is the only ingress) is
 yours to enforce structurally, and **C-3** (secrets) governs every file you
 write.
 

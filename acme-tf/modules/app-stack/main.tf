@@ -69,6 +69,7 @@ locals {
     loki_username         = var.loki_username
     data_device           = var.data_device
     backup_retention_days = var.backup_retention_days
+    backup_upload_url     = var.backup_upload_url
 
     # Indented to sit under a write_files `content: |` block.
     compose_file    = indent(6, local.compose_file)

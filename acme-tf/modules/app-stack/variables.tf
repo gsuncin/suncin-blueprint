@@ -164,3 +164,14 @@ variable "backup_retention_days" {
   type    = number
   default = 14
 }
+
+# Where each nightly dump is also sent, off the box: a pre-authenticated,
+# write-only object-store URL (an OCI PAR, or an S3 presigned prefix), ending
+# in `/`. Empty keeps the dumps on the box only, which a failed volume takes
+# with the database (ported from gestapro-monorepo R-161).
+variable "backup_upload_url" {
+  description = "Write-only object-store URL prefix the nightly dump is PUT to. Empty: no off-box copy."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

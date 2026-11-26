@@ -64,11 +64,15 @@ http:
     # This is the PRIMARY rate control. It keys on the source address, which a
     # client cannot spoof. The application's own throttle keys on a header and
     # is defence in depth only.
+    # 120/min, burst 60, the API's floor: a team shares one NAT address and a
+    # deploy renames every chunk, so 30/min answered "Too Many Requests" to a
+    # whole office in graav-app on 2026-11-09 (R-2026-11-09-7c41e2).
+    # scripts/tests/gateway-rate-limits.test.sh holds the floor.
     ratelimit-app:
       rateLimit:
-        average: 30
+        average: 120
         period: 1m
-        burst: 20
+        burst: 60
 
     ratelimit-api:
       rateLimit:
@@ -83,6 +87,16 @@ http:
         average: 5
         period: 1m
         burst: 5
+
+    # The anonymous surface (/api/public/): forms and lookups a stranger can
+    # call. Tighter than `ratelimit-api` because nobody here has authenticated,
+    # and the BFF's own throttles are defence in depth; this one is counted per
+    # source IP, which is what stops someone enumerating codes in a path.
+    ratelimit-public:
+      rateLimit:
+        average: 20
+        period: 1m
+        burst: 10
 
     ratelimit-webhook:
       rateLimit:
@@ -138,6 +152,18 @@ http:
             font-src 'self' data: https://fonts.gstatic.com; form-action 'self';
             frame-ancestors 'none'; img-src 'self' data: blob:;
             script-src 'self'; style-src 'self' 'unsafe-inline'
+          # The same policy, report-only, with a report-uri: the enforced header
+          # blocks silently, and a third-party script that changes shows up only
+          # as a feature that stopped working. Reports land in the BFF's `csp`
+          # log (core/csp_report.py), with no path past the first segment.
+          # scripts/tests/gateway-csp.test.sh holds the two policies equal.
+          # (Ported from gestapro-monorepo R-302.)
+          Content-Security-Policy-Report-Only: >-
+            default-src 'self'; base-uri 'self'; connect-src 'self';
+            font-src 'self' data: https://fonts.gstatic.com; form-action 'self';
+            frame-ancestors 'none'; img-src 'self' data: blob:;
+            script-src 'self'; style-src 'self' 'unsafe-inline';
+            report-uri /api/public/csp-report/
           # Traefik echoes its version otherwise.
           Server: ""
           X-Powered-By: ""
@@ -194,6 +220,13 @@ http:
     landing-chain:
       chain:
         middlewares: [security-headers-apex, compress, ratelimit-app, strip-identity-headers]
+
+    # The anonymous surface: no forward-auth, so it strips like every other
+    # unauthenticated chain. Every BFF view under /api/public/ must declare its
+    # own throttle scope too.
+    public-anon-chain:
+      chain:
+        middlewares: [security-headers, compress, ratelimit-public, strip-identity-headers]
 
     # Health and JWKS. Unauthenticated on purpose, so they strip.
     health-chain:

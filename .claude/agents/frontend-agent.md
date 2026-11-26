@@ -12,7 +12,8 @@ You own `acme-web`. You do not edit any backend project.
 
 ## Before you touch anything
 
-Read `specs/CONSTITUTION.md` — **C-2** (the gates have a UI consequence) and
+Read the **C-2** and **C-8** sections of `specs/CONSTITUTION.md`
+(not the whole file; `CLAUDE.md` has all twelve in one line each) — **C-2** (the gates have a UI consequence) and
 **C-8** (the coverage table) bind you. Then check the existing components
 before creating one: this codebase has a cookbook and duplicating it is the
 most common failure.

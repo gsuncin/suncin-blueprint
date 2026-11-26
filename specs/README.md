@@ -34,7 +34,7 @@ This is not tidiness. A spec that ships and stays in `specs/` reads, to the
 next session, exactly like a spec that is still open — and the cost of that is
 concrete: a session can plan and rebuild an entire wave of work that is already
 merged, because the file describing it still says "pending". Before trusting
-any spec, read `git log origin/main` and `releases/`. A workstream file
+any spec, read `git log origin/develop` and `releases/`. A workstream file
 describing a task as pending is not evidence the task is pending.
 
 ## Before you file a `Q-n`, try to close it

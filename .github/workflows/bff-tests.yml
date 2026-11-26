@@ -21,7 +21,9 @@ concurrency:
 jobs:
   django:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 60, not 15: graav-app's release PR was cancelled at 15m18s when its suite
+    # reached ~2,000 tests. The limit guards a hung job; it is not a budget.
+    timeout-minutes: 60
 
     services:
       postgres:
@@ -111,5 +113,13 @@ jobs:
           STORAGE_SECRET_KEY: ${{ github.run_id }}-check-deploy-only
           STORAGE_BUCKET_PRIVATE: check-deploy-only
 
-      - run: python manage.py test --verbosity 2
+      # In parallel, on throwaway test_<DB_NAME> databases. Serial on MIRROR this
+      # one step was 23 to 34 minutes of graav-app's job in November 2026.
+      # TEST_PARALLEL turns MIRROR off, which --parallel needs: each worker
+      # clones its own database from the one Django creates. The `migrate`
+      # above still proves the migrations apply to DB_NAME itself. `auto` is one
+      # worker per CPU. run-all-tests.sh stays serial on MIRROR as the local gate.
+      - run: python manage.py test --parallel auto --noinput --verbosity 2
         working-directory: acme-bff
+        env:
+          TEST_PARALLEL: "True"

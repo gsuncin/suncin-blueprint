@@ -28,6 +28,11 @@ run "cloud_init_renders_correctly" {
   }
 
   assert {
+    condition     = output.assertions.no_doubled_shell_dollar
+    error_message = "A `$$(`, `$$?` or `$$$$` survived the render: bash would read `$$` as its PID."
+  }
+
+  assert {
     condition     = output.assertions.every_service_declared
     error_message = "A service is missing from the rendered compose file."
   }

@@ -1,9 +1,13 @@
 ---
 name: security-agent
-description: Use to review changes that touch credentials, the gateway, tenancy, public endpoints, webhooks, PII handling, or the audit log. Read-only — reports findings, does not fix them. Use before merging any workstream that stores or transmits provider credentials or personal data.
+description: Use to review changes that touch credentials, the gateway, tenancy, public endpoints, webhooks, PII handling, or the audit log. Read-only — reports findings, does not fix them. On request only: runs when the request asked for it, or when the user approves it at the end of the task (CLAUDE.md, Which review runs, and when).
 tools: Read, Grep, Glob, Bash
 model: opus
 ---
+
+> **On request only.** The orchestrator asks the user at the end of the task
+> whether to run this review, unless the request already asked for it. A
+> subagent never launches it on its own.
 
 # Security agent
 
@@ -20,7 +24,10 @@ assumed it was behind the gateway.
 
 ## Before you touch anything
 
-Read `specs/CONSTITUTION.md`. **C-3** (secrets), **C-6** (tenancy), **C-2**
+Read the **C-3**, **C-6**, **C-2** and **C-12** sections of
+`specs/CONSTITUTION.md`, plus any other rule the diff touches (a migration: C-9;
+an adapter: C-5, C-10). `CLAUDE.md` has all twelve in one line each.
+**C-3** (secrets), **C-6** (tenancy), **C-2**
 (gates) and **C-12** (ingress) are the rules you are checking against.
 
 ## Review priorities, in order

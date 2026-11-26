@@ -61,7 +61,10 @@ release_services() {
         /^  [A-Za-z0-9._-]+:[[:space:]]*$/ { service = $1; sub(/:$/, "", service); next }
         # index(), not a regex: the host is data, and `ghcr.io` as a pattern
         # also matches `ghcrxio`.
-        service != "" && $1 == "image:" && index($2, host "/") == 1 { print service }
+        # A ref carrying `@` is pinned by digest: it is not built per release,
+        # nothing re-tags it, so it is never a release service (graav-app
+        # R-2026-10-16-0c4918).
+        service != "" && $1 == "image:" && index($2, host "/") == 1 && index($2, "@") == 0 { print service }
     ' "$1"
 }
 
@@ -102,6 +105,24 @@ trap 'rc=$?; echo "$(date -Is) deploy FAILED rc=$rc line=$LINENO tag=$IMAGE_TAG"
 
 echo "=== $(date -Is) deploying ${IMAGE_TAG} ==="
 
+# The Docker tag grammar, checked here as well as in deploy-prod.yml's preflight:
+# IMAGE_TAG reaches this shell through `ssh ... env IMAGE_TAG=...` and goes into
+# a sed expression below.
+if ! [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+    echo "refusing '${IMAGE_TAG}': not a valid image tag" >&2
+    exit 1
+fi
+
+# Build-triggered runs pass SKIP_IF_ALREADY_DEPLOYED=1: two builds of the same
+# commit both trigger deploy-prod, and the second must not redeploy what the
+# first already shipped. The box's own status file is the record; a dispatch
+# (a deliberate redeploy) passes 0.
+if [ "${SKIP_IF_ALREADY_DEPLOYED:-0}" = 1 ] \
+   && sudo grep -qE " deploy succeeded tag=${IMAGE_TAG}\$" "$STATUS" 2>/dev/null; then
+    echo "--- ${IMAGE_TAG} is already deployed and healthy here; nothing to do ---"
+    exit 0
+fi
+
 cd "$INSTALL_DIR"
 
 # The one list, for all four uses below. Fail closed: an empty derivation means
@@ -125,23 +146,39 @@ echo "--- registry login ---"
 echo "${REGISTRY_TOKEN}" | sudo docker login ghcr.io -u "${REGISTRY_USERNAME}" --password-stdin
 
 # --- Record what is running now, so a failed deploy can be undone -------------
-echo "--- capturing current image digests for rollback ---"
+# The rollback is the compose file as it stands now: the tags the running
+# containers were created from. Restoring a whole file cannot miss a service
+# whose name differs from its image (`worker` runs the bff image), and the
+# images are already on the box because the containers are running on them.
+# The refs are logged for whoever reads the output.
+echo "--- recording what runs now, for rollback ---"
 ROLLBACK_FILE="${INSTALL_DIR}/rollback-images"
+PREVIOUS="${INSTALL_DIR}/docker-compose.previous.yml"
 sudo rm -f "$ROLLBACK_FILE"
 for service in "${SERVICES[@]}"; do
-    digest="$(sudo docker inspect --format '{{index .RepoDigests 0}}' \
-              "${PROJECT}-${service}" 2>/dev/null || echo "")"
-    [ -n "$digest" ] && echo "${service}=${digest}" | sudo tee -a "$ROLLBACK_FILE" > /dev/null
+    ref="$(sudo docker inspect --format '{{.Config.Image}}' \
+           "${PROJECT}-${service}" 2>/dev/null || echo "")"
+    [ -n "$ref" ] && echo "${service}=${ref}" | sudo tee -a "$ROLLBACK_FILE" > /dev/null
 done
 sudo cat "$ROLLBACK_FILE" 2>/dev/null || echo "(nothing running yet)"
+sudo cp "$COMPOSE_FILE" "$PREVIOUS"
 
-# --- Point the compose file at the new tag ------------------------------------
-echo "--- pinning images to ${IMAGE_TAG} ---"
-sudo sed -i -E "s#(image: ${REGISTRY_HOST_RE}/[^:[:space:]]+):[^[:space:]]+#\1:${IMAGE_TAG}#" "$COMPOSE_FILE"
-grep -n "image: ${REGISTRY_HOST}" "$COMPOSE_FILE"
+# --- Pull first, then swap -----------------------------------------------------
+# The new tag goes into a staged copy, and every image is pulled from THAT copy
+# before the live file changes. A missing image fails here with production
+# untouched (graav-app R-2026-10-16-4ed9c2). The sed skips digest-pinned refs:
+# `@` is excluded from both classes and the match is anchored to the line end.
+NEXT="${INSTALL_DIR}/docker-compose.next.yml"
+echo "--- staging ${NEXT} at ${IMAGE_TAG} ---"
+sudo cp "$COMPOSE_FILE" "$NEXT"
+sudo sed -i -E "s#^([[:space:]]*image: ${REGISTRY_HOST_RE}/[^:@[:space:]]+):[^@[:space:]]+[[:space:]]*\$#\1:${IMAGE_TAG}#" "$NEXT"
+grep -n "image: ${REGISTRY_HOST}" "$NEXT"
 
 echo "--- pulling ---"
-sudo docker compose pull < /dev/null
+sudo docker compose -f "$NEXT" pull < /dev/null
+
+echo "--- every image is here; swapping the compose file ---"
+sudo mv "$NEXT" "$COMPOSE_FILE"
 
 # --- Migrate BEFORE swapping containers ---------------------------------------
 # The old backend is still serving while this runs, and migrations are additive
@@ -183,11 +220,10 @@ if [ -n "$unhealthy" ]; then
     echo "!!! containers did not become healthy:${unhealthy}"
     echo "--- rolling back ---"
     if [ -s "$ROLLBACK_FILE" ]; then
-        while IFS='=' read -r service digest; do
-            echo "  restoring ${service} -> ${digest}"
-            sudo sed -i -E "s#(image: ${REGISTRY_HOST_RE}/[^[:space:]]*${service}):[^[:space:]]+#${digest}#" \
-                "$COMPOSE_FILE"
+        while IFS='=' read -r service ref; do
+            echo "  restoring ${service} -> ${ref}"
         done < "$ROLLBACK_FILE"
+        sudo cp "$PREVIOUS" "$COMPOSE_FILE"
         sudo docker compose up -d --no-deps --force-recreate "${SERVICES[@]}" < /dev/null
         echo "$(date -Is) deploy ROLLED BACK from ${IMAGE_TAG}" | sudo tee "$STATUS"
     else

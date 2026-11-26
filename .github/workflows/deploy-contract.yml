@@ -15,6 +15,8 @@ on:
       - ".github/scripts/deploy-remote.sh"
       - ".github/scripts/diagnose-remote.sh"
       - ".github/scripts/check-deploy-contract.sh"
+      - ".github/scripts/release-images.sh"
+      - ".github/workflows/retag-unchanged.yml"
       - ".github/workflows/deploy-contract.yml"
       - ".github/workflows/deploy-prod.yml"
       - ".github/workflows/diagnose-prod.yml"
@@ -24,10 +26,14 @@ on:
       - "docker-compose.yml"
       - "acme-svc-*/Dockerfile"
   pull_request:
+    # ready_for_review: a draft runs nothing (scripts/check-ci-skips-drafts.sh).
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - ".github/scripts/deploy-remote.sh"
       - ".github/scripts/diagnose-remote.sh"
       - ".github/scripts/check-deploy-contract.sh"
+      - ".github/scripts/release-images.sh"
+      - ".github/workflows/retag-unchanged.yml"
       - ".github/workflows/deploy-contract.yml"
       - ".github/workflows/deploy-prod.yml"
       - ".github/workflows/diagnose-prod.yml"
@@ -49,6 +55,7 @@ concurrency:
 
 jobs:
   contract:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

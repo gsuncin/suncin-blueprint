@@ -14,7 +14,8 @@ do not edit `acme-bff` or `acme-web`.
 
 ## Before you touch anything
 
-Read `specs/CONSTITUTION.md` — **C-5** (hexagonal boundaries) is your rule, with
+Read the **C-5**, **C-3**, **C-4** and **C-10** sections of
+`specs/CONSTITUTION.md` (not the whole file; `CLAUDE.md` has all twelve in one line each) — **C-5** (hexagonal boundaries) is your rule, with
 **C-3** (stateless, secrets in headers only), **C-4** (idempotency) and **C-10**
 (do not fabricate provider behaviour) close behind.
 

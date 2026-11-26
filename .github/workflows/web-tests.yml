@@ -15,7 +15,9 @@ concurrency:
 jobs:
   vitest-and-playwright:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 60, not 20: `playwright install` alone took 10.5 minutes on one hosted
+    # runner in graav-app. The limit guards a hung job; it is not a budget.
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v5
@@ -47,7 +49,10 @@ jobs:
 
       # Performance and accessibility floors for the landing page, which is the
       # only page an anonymous visitor sees.
-      - run: npm run test:lighthouse
+      # `lhci autorun` directly, not `npm run test:lighthouse`: that script runs
+      # `npm run build` first and would rebuild the dist/ the build step above
+      # just produced. lighthouserc.cjs serves that dist/ with `vite preview`.
+      - run: npx lhci autorun
         working-directory: acme-web
 
       - uses: actions/upload-artifact@v4
