@@ -66,7 +66,9 @@ DATABASES = {
         # a throwaway database. That is deliberate — it keeps CI and local runs
         # on one migration path — but it means you MUST point DB_NAME at a
         # scratch database when testing, never at your dev data. See C-8.
-        "TEST": {"MIRROR": "default"},
+        # TEST_PARALLEL opts out for CI's `manage.py test --parallel`: it needs
+        # a test database of its own to clone per worker, and MIRROR leaves it none.
+        "TEST": {} if config("TEST_PARALLEL", default=False, cast=bool) else {"MIRROR": "default"},
     }
 }
 
