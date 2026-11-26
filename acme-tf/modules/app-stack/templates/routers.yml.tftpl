@@ -46,6 +46,14 @@ http:
       service: bff
       tls: {certResolver: letsencrypt}
 
+    api-public:
+      rule: "Host(`${domain_app}`) && PathPrefix(`/api/public/`)"
+      priority: 860
+      entryPoints: [websecure]
+      middlewares: [public-anon-chain]
+      service: bff
+      tls: {certResolver: letsencrypt}
+
     public-api:
       rule: "Host(`${domain_app}`) && PathPrefix(`/public-api/`)"
       priority: 800

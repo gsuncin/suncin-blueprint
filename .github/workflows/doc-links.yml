@@ -42,6 +42,9 @@ jobs:
       - name: retag-unchanged selftest
         if: ${{ !cancelled() }}
         run: ./scripts/tests/retag-unchanged.test.sh
+      - name: gateway rate limits
+        if: ${{ !cancelled() }}
+        run: ./scripts/tests/gateway-rate-limits.test.sh
       - name: workflows skip drafts
         if: ${{ !cancelled() }}
         run: ./scripts/check-ci-skips-drafts.sh

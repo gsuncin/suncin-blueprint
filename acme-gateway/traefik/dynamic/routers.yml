@@ -63,6 +63,17 @@ http:
       middlewares: [webhook-chain]
       service: bff
 
+    # 860 — the anonymous surface: forms and lookups a stranger can call.
+    # Without this router such a path falls through to `/api/` at 700 and
+    # forwardAuth refuses it at the edge while the BFF view works fine inside
+    # (graav-app Q-2.13). It strips and takes ratelimit-public.
+    api-public:
+      rule: "Host(`app.localhost`) && PathPrefix(`/api/public/`)"
+      priority: 860
+      entryPoints: [web]
+      middlewares: [public-anon-chain]
+      service: bff
+
     # 800 — the third-party API. Separate prefix so its auth, its limits and
     # its scopes can differ from the application's without either affecting the
     # other. This prefix is why the gateway exists.
